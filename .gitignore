@@ -1,5 +1,9 @@
 ### https://raw.github.com/github/gitignore/340e2fe08a2356c2e3760ff58c3a9e1fddf08060/Python.gitignore
-
+*.ipynb
+*.csv
+*.xlsx
+*.gip
+*.zgip
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
