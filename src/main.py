@@ -70,8 +70,7 @@ if __name__ == "__main__":
         df["plan_S"] = [int("S" in x) for x in df["間取り"].fillna("")]
 
         # 物件情報、面積
-        df[df["面積（㎡）"] == "2000㎡以上"]["面積（㎡）"] = "2000"
-        df["area"] = df["面積（㎡）"].astype(float)
+        df["area"] = [float(x) if x != "2000㎡以上" else 2000 for x in df["面積（㎡）"]]
 
         unuse_columns = ["都道府県名", "市区町村名", "地区名", "最寄駅：名称", "最寄駅：距離（分）", "間取り", "面積（㎡）"]
         df = df.drop(unuse_columns, axis=1)
