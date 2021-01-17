@@ -91,10 +91,12 @@ def preprocess(train_df, test_df):
         df["plan_D"] = [int("Ｄ" in x) for x in df["間取り"].fillna("")]
         df["plan_K"] = [int("Ｋ" in x) for x in df["間取り"].fillna("")]
         df["plan_R"] = [int("Ｒ" in x) for x in df["間取り"].fillna("")]
-        df["plan_S"] = [int("S" in x) for x in df["間取り"].fillna("")]
+        # df["plan_S"] = [int("S" in x) for x in df["間取り"].fillna("")]
 
         # 物件情報、面積
-        df["area"] = [float(x) if x != "2000㎡以上" else 2000 for x in df["面積（㎡）"]]
+        df["面積（㎡）"] = [x if x != "2000㎡以上" else "2000" for x in df["面積（㎡）"]]
+        df["面積（㎡）"] = [x if x != "m^2未満" else "2" for x in df["面積（㎡）"]]
+        df["area"] = df["面積（㎡）"].astype(float)
 
         # 建築年
         j2w = jeraconv.J2W()
@@ -103,9 +105,9 @@ def preprocess(train_df, test_df):
 
         # 建物の構造
         df["structure"] = df["建物の構造"]
-        df["structure_block"] = [int("ブロック造" in x) for x in df["建物の構造"].fillna("")]
+        # df["structure_block"] = [int("ブロック造" in x) for x in df["建物の構造"].fillna("")]
         df["structure_wood"] = [int("木造" in x) for x in df["建物の構造"].fillna("")]
-        df["structure_lightiron"] = [int("軽量鉄骨造" in x) for x in df["建物の構造"].fillna("")]
+        # df["structure_lightiron"] = [int("軽量鉄骨造" in x) for x in df["建物の構造"].fillna("")]
         df["structure_iron"] = [int("鉄骨造" in x) for x in df["建物の構造"].fillna("")]
         df["structure_RC"] = [int("ＲＣ" in x) for x in df["建物の構造"].fillna("")]  # SRCも含まれるけどいいのか
         df["structure_SRC"] = [int("ＳＲＣ" in x) for x in df["建物の構造"].fillna("")]
@@ -118,8 +120,8 @@ def preprocess(train_df, test_df):
         df["usage_shop"] = [int("店舗" in x) for x in df["用途"].fillna("")]
         df["usage_parking"] = [int("駐車場" in x) for x in df["用途"].fillna("")]
         df["usage_house"] = [int("住宅" in x) for x in df["用途"].fillna("")]
-        df["usage_workshop"] = [int("作業場" in x) for x in df["用途"].fillna("")]
-        df["usage_factory"] = [int("工場" in x) for x in df["用途"].fillna("")]
+        # df["usage_workshop"] = [int("作業場" in x) for x in df["用途"].fillna("")]
+        # df["usage_factory"] = [int("工場" in x) for x in df["用途"].fillna("")]
 
         # 今後の利用目的、都市計画、建ぺい率、改装
         df["future_usage"] = df["今後の利用目的"]
@@ -136,10 +138,13 @@ def preprocess(train_df, test_df):
         # 取引の事情等
         df["reason"] = df["取引の事情等"]
         df["reason_other"] = [int("その他事情有り" in x) for x in df["取引の事情等"].fillna("")]
-        df["reason_burden"] = [int("他の権利・負担付き" in x) for x in df["取引の事情等"].fillna("")]
+        # df["reason_burden"] = [int("他の権利・負担付き" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_auction"] = [int("調停・競売等" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_defects"] = [int("瑕疵有りの可能性" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_related_parties"] = [int("関係者間取引" in x) for x in df["取引の事情等"].fillna("")]
+
+        # 容積率 x 面積
+        df["floor_area_ratio_x_area"] = df["floor_area_ratio"] * df["area"]
         logger.debug(f"head : {df.head()}")
 
     # 不要なカラム削除
@@ -361,7 +366,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
 
     # submit
