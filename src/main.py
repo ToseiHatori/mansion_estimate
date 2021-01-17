@@ -315,6 +315,7 @@ class LGBTrainer(GroupKfoldTrainer):
         ret = {}
         ret["model"] = model
         ret["importance"] = self._get_importance(model, importance_type="gain")
+        logger.debug(f'importance: {ret["importance"]}')
         return ret
 
     def _predict(self, model, X):
@@ -335,12 +336,13 @@ if __name__ == "__main__":
     train_df, test_df = preprocess(train_df, test_df)
 
     logger.info("training data")
-    predictors = [x for x in train_df.columns if x not in ["ID", "y"]]
+    predictors = [x for x in train_df.columns if x not in ["ID", "y", "base_year"]]
+    logger.debug(f"predictors: {predictors}")
     if debug:
         n_splits = 2
         n_rsb = 1
     else:
-        n_splits = 12
+        n_splits = 6
         n_rsb = 5
     params = {
         "objective": "mae",
