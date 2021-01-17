@@ -341,7 +341,7 @@ if __name__ == "__main__":
     train_df, test_df = preprocess(train_df, test_df)
 
     logger.info("training data")
-    predictors = [x for x in train_df.columns if x not in ["ID", "y", "base_year"]]
+    predictors = [x for x in train_df.columns if x not in ["ID", "y", "base_year", "floor_area_ratio"]]
     logger.debug(f"predictors: {predictors}")
     if debug:
         n_splits = 2
@@ -366,7 +366,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
+        categorical_cols=["pref", "pref_city", "pref_city_district", "remodeling"],
     )
 
     # submit
