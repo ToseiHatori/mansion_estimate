@@ -236,9 +236,12 @@ class GroupKfoldTrainer(object):
             fold_cnt += 1
             self.fold_cnt = fold_cnt
             logger.info(f"START FOLD {fold_cnt}")
+
             # DataFrame -> train, valid
             X_train, X_valid = self.X.loc[train_idx, self.predictors], self.X.loc[valid_idx, self.predictors]
             Y_train, Y_valid = self.X.loc[train_idx, self.target_col], self.X.loc[valid_idx, self.target_col]
+            logger.debug(f"training years : {set(self.X.loc[train_idx, 'base_year'])}")
+            logger.debug(f"validation years : {set(self.X.loc[valid_idx, 'base_year'])}")
 
             # random seed blending
             for rsb_idx in range(self.n_rsb):
@@ -304,7 +307,7 @@ class LGBTrainer(GroupKfoldTrainer):
             self.params,
             dtrain,
             valid_sets=[dtrain, dvalid],
-            num_boost_round=1000,
+            num_boost_round=10000,
             categorical_feature=self.categorical_cols,
             early_stopping_rounds=100,
             verbose_eval=100,
@@ -335,8 +338,10 @@ if __name__ == "__main__":
     predictors = [x for x in train_df.columns if x not in ["ID", "y"]]
     if debug:
         n_splits = 2
+        n_rsb = 1
     else:
-        n_splits = 5
+        n_splits = 12
+        n_rsb = 5
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
@@ -352,7 +357,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=2,
+        n_rsb=n_rsb,
         params=params,
         categorical_cols=[],
     )
