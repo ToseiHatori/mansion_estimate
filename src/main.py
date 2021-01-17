@@ -187,6 +187,9 @@ def preprocess(train_df, test_df):
     ce_oe = ce.OrdinalEncoder()
     train_df.loc[:, category_columns] = ce_oe.fit_transform(train_df[category_columns])
     test_df.loc[:, category_columns] = ce_oe.transform(test_df[category_columns])
+
+    # target_encoding
+
     logger.debug(f"train head : {train_df.head()}")
     logger.debug(f"test head : {test_df.head()}")
     return train_df, test_df
@@ -312,7 +315,7 @@ class LGBTrainer(GroupKfoldTrainer):
             self.params,
             dtrain,
             valid_sets=[dtrain, dvalid],
-            num_boost_round=10000,
+            num_boost_round=50000,
             categorical_feature=self.categorical_cols,
             early_stopping_rounds=100,
             verbose_eval=100,
