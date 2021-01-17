@@ -366,7 +366,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
 
     # submit
