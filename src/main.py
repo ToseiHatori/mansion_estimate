@@ -1,14 +1,25 @@
-import pandas as pd
-import logging
-import gc
-import subprocess
+import argparse
 import datetime
+import gc
 import glob
+import logging
+import os
+import pickle
+import random
 import re
-from jeraconv import jeraconv
-import category_encoders as ce
+import subprocess
+from pathlib import Path
 
-# 日付など
+import category_encoders as ce
+import lightgbm as lgb
+import numpy as np
+import pandas as pd
+import torch
+from jeraconv import jeraconv
+from sklearn.metrics import mean_absolute_error
+from sklearn.model_selection import GroupKFold
+
+# 日付とutil系
 dt_now = datetime.datetime.now()
 dt_now = dt_now.strftime("%Y%m%d_%H:%M")
 gc.enable()
@@ -25,15 +36,27 @@ logging.basicConfig(level=logging.DEBUG, format=formatter, filename=f"log/logger
 logger = logging.getLogger(__name__)
 
 
+def set_seed(seed):
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
 def get_data():
-    unuse_columns = ["ID", "種類", "地域", "市区町村コード", "土地の形状", "間口", "延床面積（㎡）", "前面道路：方位", "前面道路：種類", "前面道路：幅員（ｍ）"]
+    unuse_columns = ["種類", "地域", "市区町村コード", "土地の形状", "間口", "延床面積（㎡）", "前面道路：方位", "前面道路：種類", "前面道路：幅員（ｍ）"]
     train_files = sorted(glob.glob("./data/raw/train/*"))
+    if debug:
+        train_files = train_files[0:3]
     train_df = []
     for file in train_files:
         train_df.append(pd.read_csv(file, low_memory=False))
     train_df = pd.concat(train_df, axis=0).drop(unuse_columns, axis=1).reset_index(drop=True)
     test_df = pd.read_csv("./data/raw/test.csv").drop(unuse_columns, axis=1).reset_index(drop=True)
-    return train_df, test_df
+    sample_submission = pd.read_csv("./data/raw/sample_submission.csv")
+    return train_df, test_df, sample_submission
 
 
 def preprocess(train_df, test_df):
@@ -154,6 +177,7 @@ def preprocess(train_df, test_df):
         "future_usage",
         "city_plan",
         "remodeling",
+        "reason",
     ]
     ce_oe = ce.OrdinalEncoder()
     train_df.loc[:, category_columns] = ce_oe.fit_transform(train_df[category_columns])
@@ -163,6 +187,176 @@ def preprocess(train_df, test_df):
     return train_df, test_df
 
 
+class GroupKfoldTrainer(object):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb):
+        self.state_path = state_path
+        self.predictors = predictors
+        self.target_col = target_col
+        self.X = X
+        self.groups = groups
+        self.test = test
+        self.n_splits = n_splits
+        self.n_rsb = n_rsb
+        self.oof = np.zeros(len(X))
+        self.pred = np.zeros(len(test))
+        self.validation_score = []
+        self.folds = []
+        self.state_path = Path(state_path)
+        self.file_path = self.state_path.joinpath(f"{self.name}_{branch}_{dt_now}.pickle")
+        # 無法者なのでここで呼んじゃう
+        self.fit()
+        self.save()
+
+    def loss_(self, predictions, targets):
+        return mean_absolute_error(targets, predictions)
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        raise NotImplementedError
+
+    def _predict(self, model, X):
+        raise NotImplementedError
+
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__
+
+    def save(self):
+        with open(f"{self.file_path}", "wb") as f:
+            pickle.dump(self, f)
+            return 0
+
+    @classmethod
+    def load(cls, file_path):
+        with open(file_path, "rb") as f:
+            return pickle.load(f)
+
+    def fit(self):
+        gf = GroupKFold(n_splits=self.n_splits)
+        for fold_cnt, (train_idx, valid_idx) in enumerate(gf.split(self.X, None, self.groups)):
+            fold_cnt += 1
+            self.fold_cnt = fold_cnt
+            logger.info(f"START FOLD {fold_cnt}")
+            # DataFrame -> train, valid
+            X_train, X_valid = self.X.loc[train_idx, self.predictors], self.X.loc[valid_idx, self.predictors]
+            Y_train, Y_valid = self.X.loc[train_idx, self.target_col], self.X.loc[valid_idx, self.target_col]
+
+            # random seed blending
+            for rsb_idx in range(self.n_rsb):
+                logger.info(f"     fitting {rsb_idx + 1} th loop of {self.n_rsb}")
+                # 学習
+                ret = self._fit(X_train, Y_train, X_valid, Y_valid, loop_seed=rsb_idx)
+                # save models
+                self.folds.append(ret)
+                model = ret["model"]
+
+                # oof, predに対して予測
+                pred_oof = self._predict(model, X_valid)
+                pred_test = self._predict(model, self.test)
+                if type(pred_oof) == torch.Tensor:
+                    pred_oof = pred_oof.cpu().detach().numpy()
+                    pred_test = pred_test.cpu().detach().numpy()
+                # 格納
+                self.oof[valid_idx] += pred_oof / self.n_rsb
+                self.pred += pred_test / (self.n_splits * self.n_rsb)
+
+                # single fold validation　score
+                _validation_score = self.loss_(pred_oof, Y_valid.values)
+                logger.info((f"     finished {rsb_idx + 1}" + f"th loop WITH {_validation_score:.6f}"))
+
+            # rsb validation　score
+            _validation_score = self.loss_(self.oof[valid_idx], Y_valid.values)
+            self.validation_score.append(_validation_score)
+            logger.info(f"     END FOLD {fold_cnt} WITH {_validation_score:.6f}")
+            logger.info("----切り取り----\n")
+
+        # validation score of fold mean
+        cv_score = np.mean(self.validation_score, axis=0)
+        cv_std = np.std(self.validation_score, axis=0)
+        logger.info(f"TOTAL CV SCORE is : {cv_score:.6f} +- {cv_std:.4f}")
+        logger.info("----終わり----\n")
+
+
+class LGBTrainer(GroupKfoldTrainer):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
+        self.categorical_cols = categorical_cols
+        self.params = params
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+
+    def _get_importance(self, model, importance_type="gain"):
+        feature = model.feature_name()
+        importance = pd.DataFrame(
+            {"features": feature, "importance": model.feature_importance(importance_type=importance_type)}
+        )
+        return importance
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        set_seed(loop_seed)
+        self.params["random_seed"] = loop_seed
+        logger.debug(f"LGBM params: {self.params}")
+
+        dtrain = lgb.Dataset(
+            X_train, label=Y_train, feature_name=self.predictors, categorical_feature=self.categorical_cols
+        )
+        dvalid = lgb.Dataset(
+            X_valid, label=Y_valid, feature_name=self.predictors, categorical_feature=self.categorical_cols
+        )
+        model = lgb.train(
+            self.params,
+            dtrain,
+            valid_sets=[dtrain, dvalid],
+            num_boost_round=1000,
+            categorical_feature=self.categorical_cols,
+            early_stopping_rounds=100,
+            verbose_eval=100,
+        )
+        ret = {}
+        ret["model"] = model
+        ret["importance"] = self._get_importance(model, importance_type="gain")
+        return ret
+
+    def _predict(self, model, X):
+        return model.predict(X[self.predictors])
+
+
 if __name__ == "__main__":
-    train_df, test_df = get_data()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug")
+    args = parser.parse_args()
+    debug = args.debug
+    logger.info(f"debug mode {debug}")
+
+    logger.info("loading data")
+    train_df, test_df, sample_submission = get_data()
+
+    logger.info("preprocessing data")
     train_df, test_df = preprocess(train_df, test_df)
+
+    logger.info("training data")
+    predictors = [x for x in train_df.columns if x not in ["ID", "y"]]
+    if debug:
+        n_splits = 2
+    else:
+        n_splits = 5
+    params = {
+        "objective": "mae",
+        "boosting_type": "gbdt",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "verbosity": -1,
+    }
+    lgb_booster = LGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=2,
+        params=params,
+        categorical_cols=[],
+    )
+
+    # submit
+    sample_submission["取引価格（総額）_log"] = lgb_booster.pred
+    sample_submission.to_csv("./submit.csv", index=False)
