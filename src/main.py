@@ -6,6 +6,7 @@ import datetime
 import glob
 import re
 from jeraconv import jeraconv
+import category_encoders as ce
 
 # 日付など
 dt_now = datetime.datetime.now()
@@ -35,12 +36,9 @@ def get_data():
     return train_df, test_df
 
 
-def preprocess(df_train, df_test):
-    return
-
-
-if __name__ == "__main__":
-    train_df, test_df = get_data()
+def preprocess(train_df, test_df):
+    # 目的変数rename
+    train_df = train_df.rename(columns={"取引価格（総額）_log": "y"})
 
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
@@ -119,27 +117,52 @@ if __name__ == "__main__":
         df["reason_auction"] = [int("調停・競売等" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_defects"] = [int("瑕疵有りの可能性" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_related_parties"] = [int("関係者間取引" in x) for x in df["取引の事情等"].fillna("")]
-
-        # 削除
-        unuse_columns = [
-            "都道府県名",
-            "市区町村名",
-            "地区名",
-            "最寄駅：名称",
-            "最寄駅：距離（分）",
-            "間取り",
-            "面積（㎡）",
-            "建築年",
-            "建物の構造",
-            "用途",
-            "今後の利用目的",
-            "都市計画",
-            "建ぺい率（％）",
-            "容積率（％）",
-            "改装",
-            "取引時点",
-            "取引の事情等",
-        ]
-        df = df.drop(unuse_columns, axis=1)
-
         logger.debug(f"head : {df.head()}")
+
+    # 不要なカラム削除
+    unuse_columns = [
+        "都道府県名",
+        "市区町村名",
+        "地区名",
+        "最寄駅：名称",
+        "最寄駅：距離（分）",
+        "間取り",
+        "面積（㎡）",
+        "建築年",
+        "建物の構造",
+        "用途",
+        "今後の利用目的",
+        "都市計画",
+        "建ぺい率（％）",
+        "容積率（％）",
+        "改装",
+        "取引時点",
+        "取引の事情等",
+    ]
+    train_df = train_df.drop(unuse_columns, axis=1)
+    test_df = test_df.drop(unuse_columns, axis=1)
+
+    # label encoding
+    category_columns = [
+        "pref",
+        "pref_city",
+        "pref_city_district",
+        "station",
+        "plan",
+        "structure",
+        "usage",
+        "future_usage",
+        "city_plan",
+        "remodeling",
+    ]
+    ce_oe = ce.OrdinalEncoder()
+    train_df.loc[:, category_columns] = ce_oe.fit_transform(train_df[category_columns])
+    test_df.loc[:, category_columns] = ce_oe.transform(test_df[category_columns])
+    logger.debug(f"train head : {train_df.head()}")
+    logger.debug(f"test head : {test_df.head()}")
+    return train_df, test_df
+
+
+if __name__ == "__main__":
+    train_df, test_df = get_data()
+    train_df, test_df = preprocess(train_df, test_df)
