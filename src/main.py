@@ -21,7 +21,7 @@ import torch.nn as nn
 from jeraconv import jeraconv
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import MinMaxScaler
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
@@ -363,15 +363,15 @@ class MLPModel(nn.Module):
     def __init__(self, input_dim):
         super(MLPModel, self).__init__()
         self.sq1 = nn.Sequential(
-            nn.Linear(input_dim, 1),
-            # nn.BatchNorm1d(512),
-            # nn.Dropout(0.5),
-            # nn.PReLU(),
-            # nn.Linear(512, 512),
-            # nn.BatchNorm1d(512),
-            # nn.Dropout(0.5),
-            # nn.PReLU(),
-            # nn.Linear(512, 1),
+            nn.Linear(input_dim, 512),
+            nn.BatchNorm1d(512),
+            nn.Dropout(0.5),
+            nn.PReLU(),
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
+            nn.Dropout(0.5),
+            nn.PReLU(),
+            nn.Linear(512, 1),
         )
 
     def forward(self, x):
@@ -405,7 +405,7 @@ class MLPTrainer(GroupKfoldTrainer):
         # numpy array -> data loader
         train_set = MEDataset(is_train=True, feature=_X_train, labels=_Y_train)
         train_loader = DataLoader(
-            train_set, batch_size=256, shuffle=True, num_workers=0, pin_memory=True, drop_last=True
+            train_set, batch_size=1024, shuffle=True, num_workers=0, pin_memory=True, drop_last=True
         )
         val_set = MEDataset(is_train=True, feature=_X_valid, labels=_Y_valid)
         val_loader = DataLoader(val_set, batch_size=1024, num_workers=0, pin_memory=False, drop_last=False)
@@ -519,13 +519,13 @@ if __name__ == "__main__":
     # )
     # 前処理
     logger.info("scaling...")
-    transformer = RobustScaler()
+    transformer = MinMaxScaler()
     train_df["is_train"] = 1
     test_df["is_train"] = 0
     df = pd.concat([train_df, test_df], axis=0).reset_index(drop=True)
     df[predictors] = transformer.fit_transform(df[predictors])
-    train_df = df[df["is_train"] == 1].reset_index(drop=False)
-    test_df = df[df["is_train"] == 0].reset_index(drop=False)
+    train_df = df[df["is_train"] == 1].fillna(0).reset_index(drop=False)
+    test_df = df[df["is_train"] == 0].fillna(0).reset_index(drop=False)
     del df
     gc.collect()
 
