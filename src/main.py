@@ -363,15 +363,15 @@ class MLPModel(nn.Module):
     def __init__(self, input_dim):
         super(MLPModel, self).__init__()
         self.sq1 = nn.Sequential(
-            nn.Linear(input_dim, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(input_dim, 1024),
+            nn.BatchNorm1d(1024),
             nn.Dropout(0.5),
-            nn.PReLU(),
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Linear(1024, 1024),
+            nn.BatchNorm1d(1024),
             nn.Dropout(0.5),
-            nn.PReLU(),
-            nn.Linear(512, 1),
+            nn.ReLU(),
+            nn.Linear(1024, 1),
         )
 
     def forward(self, x):
@@ -405,7 +405,7 @@ class MLPTrainer(GroupKfoldTrainer):
         # numpy array -> data loader
         train_set = MEDataset(is_train=True, feature=_X_train, labels=_Y_train)
         train_loader = DataLoader(
-            train_set, batch_size=1024, shuffle=True, num_workers=0, pin_memory=True, drop_last=True
+            train_set, batch_size=5000, shuffle=True, num_workers=0, pin_memory=True, drop_last=True
         )
         val_set = MEDataset(is_train=True, feature=_X_valid, labels=_Y_valid)
         val_loader = DataLoader(val_set, batch_size=1024, num_workers=0, pin_memory=False, drop_last=False)
@@ -413,13 +413,13 @@ class MLPTrainer(GroupKfoldTrainer):
         # create network, optimizer, scheduler
         network = MLPModel(_X_train.shape[1])
         optimizer = Adam(network.parameters(), lr=1e-3)
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=1, verbose=True)
+        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=10, verbose=True)
         val_loss_plot = []
         # begin training...
         torch.backends.cudnn.benchmark = True
         self.criterion = nn.L1Loss()
         best_score = 1000
-        for epoch in range(20):
+        for epoch in range(200):
             # train model...
             for train_batch in train_loader:
                 x, label = train_batch
