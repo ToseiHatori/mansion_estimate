@@ -1,4 +1,5 @@
 import argparse
+import copy
 import datetime
 import gc
 import glob
@@ -12,12 +13,19 @@ from pathlib import Path
 
 import category_encoders as ce
 import lightgbm as lgb
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 from jeraconv import jeraconv
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import RobustScaler
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader, Dataset
+from tqdm.auto import tqdm
 
 # 日付とutil系
 dt_now = datetime.datetime.now()
@@ -331,6 +339,143 @@ class LGBTrainer(GroupKfoldTrainer):
         return model.predict(X[self.predictors])
 
 
+class MEDataset(Dataset):
+    def __init__(self, is_train, feature, labels):
+        self.is_train = is_train
+        self.feature = feature
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.feature)
+
+    def __getitem__(self, idx):
+        features = self.feature[idx]
+        features = torch.Tensor(features)
+        if not self.is_train:
+            return features
+        else:
+            y = self.labels[idx]
+            y = torch.Tensor([y])
+            return features, y
+
+
+class MLPModel(nn.Module):
+    def __init__(self, input_dim):
+        super(MLPModel, self).__init__()
+        self.sq1 = nn.Sequential(
+            nn.Linear(input_dim, 1),
+            # nn.BatchNorm1d(512),
+            # nn.Dropout(0.5),
+            # nn.PReLU(),
+            # nn.Linear(512, 512),
+            # nn.BatchNorm1d(512),
+            # nn.Dropout(0.5),
+            # nn.PReLU(),
+            # nn.Linear(512, 1),
+        )
+
+    def forward(self, x):
+        ret = self.sq1(x)
+        return ret
+
+
+class MLPTrainer(GroupKfoldTrainer):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.categorical_cols = categorical_cols
+        self.params = params
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+
+    def _get_importance(self, model, importance_type="gain"):
+        importance = pd.DataFrame({"features": [], "importance": []})
+        return importance
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        set_seed(loop_seed)
+        # preprocess
+        # DataFrame -> numpy array
+        _X_train = X_train.values.copy()
+        _X_valid = X_valid.values.copy()
+        _Y_train = Y_train.values.copy()
+        _Y_valid = Y_valid.values.copy()
+
+        # train
+        ret = dict()
+
+        # numpy array -> data loader
+        train_set = MEDataset(is_train=True, feature=_X_train, labels=_Y_train)
+        train_loader = DataLoader(
+            train_set, batch_size=256, shuffle=True, num_workers=0, pin_memory=True, drop_last=True
+        )
+        val_set = MEDataset(is_train=True, feature=_X_valid, labels=_Y_valid)
+        val_loader = DataLoader(val_set, batch_size=1024, num_workers=0, pin_memory=False, drop_last=False)
+
+        # create network, optimizer, scheduler
+        network = MLPModel(_X_train.shape[1])
+        optimizer = Adam(network.parameters(), lr=1e-3)
+        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=1, verbose=True)
+        val_loss_plot = []
+        # begin training...
+        torch.backends.cudnn.benchmark = True
+        self.criterion = nn.L1Loss()
+        best_score = 1000
+        for epoch in range(20):
+            # train model...
+            for train_batch in train_loader:
+                x, label = train_batch
+                x = x.to(self.device)
+                label = label.to(self.device)
+
+                network.train()
+                network = network.to(self.device)
+                train_preds = network.forward(x)
+                train_loss = self.criterion(train_preds, label)
+                optimizer.zero_grad()
+                train_loss.backward()
+                optimizer.step()
+
+            # get validation score...
+            network.eval()
+            val_preds, val_targs = [], []
+            for val_batch in val_loader:
+                x, label = val_batch
+                with torch.no_grad():
+                    x = x.to(self.device)
+                    label = label.to(self.device)
+                    network = network.to(self.device)
+
+                    val_preds.append(network.forward(x))
+                    val_targs.append(label)
+            val_preds = torch.cat(val_preds, axis=0)
+            val_targs = torch.cat(val_targs, axis=0)
+            val_loss = self.criterion(val_preds, val_targs).cpu().detach().numpy()
+            scheduler.step(val_loss)
+            print(f"\r val_loss {val_loss} epoch {epoch}", end="")
+            val_loss_plot.append(float(val_loss))
+
+            # モデルを保存
+            if val_loss < best_score:
+                # モデルそのものを保存すると参照渡しになるので、わざわざ重みをコピーしてあとで入れるみたいなことをしている。
+                best_model_wts = copy.deepcopy(network.state_dict())
+                best_score = val_loss
+                logger.debug(f"model updated. best score is {best_score}")
+        print("\n")
+        if True:
+            plt.plot(val_loss_plot, label=str(self.fold_cnt))
+            # plt.ylim([0.015, 0.04])
+
+        # 一番良いところを持ってくる
+        network.load_state_dict(best_model_wts)
+        ret["model"] = network
+        return ret
+
+    def _predict(self, model, X_valid):
+        _X_valid = torch.Tensor(X_valid[self.predictors].values).to(self.device)
+        preds = model.forward(_X_valid)
+        preds = preds.cpu().detach().numpy()
+        return preds
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug")
@@ -353,14 +498,38 @@ if __name__ == "__main__":
     else:
         n_splits = 6
         n_rsb = 5
-    params = {
-        "objective": "mae",
-        "boosting_type": "gbdt",
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "verbosity": -1,
-    }
-    lgb_booster = LGBTrainer(
+    # params = {
+    #    "objective": "mae",
+    #    "boosting_type": "gbdt",
+    #    "subsample": 0.8,
+    #    "colsample_bytree": 0.8,
+    #    "verbosity": -1,
+    # }
+    # lgb_booster = LGBTrainer(
+    #    state_path="./models",
+    #    predictors=predictors,
+    #    target_col="y",
+    #    X=train_df,
+    #    groups=train_df["base_year"],
+    #    test=test_df,
+    #    n_splits=n_splits,
+    #    n_rsb=n_rsb,
+    #    params=params,
+    #    categorical_cols=["pref", "pref_city", "pref_city_district", "remodeling"],
+    # )
+    # 前処理
+    logger.info("scaling...")
+    transformer = RobustScaler()
+    train_df["is_train"] = 1
+    test_df["is_train"] = 0
+    df = pd.concat([train_df, test_df], axis=0).reset_index(drop=True)
+    df[predictors] = transformer.fit_transform(df[predictors])
+    train_df = df[df["is_train"] == 1].reset_index(drop=False)
+    test_df = df[df["is_train"] == 0].reset_index(drop=False)
+    del df
+    gc.collect()
+
+    mlp_trainer = MLPTrainer(
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -369,10 +538,9 @@ if __name__ == "__main__":
         test=test_df,
         n_splits=n_splits,
         n_rsb=n_rsb,
-        params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district", "remodeling"],
+        params={},
+        categorical_cols=[],
     )
-
     # submit
-    sample_submission["取引価格（総額）_log"] = lgb_booster.pred
+    sample_submission["取引価格（総額）_log"] = mlp_trainer.pred
     sample_submission.to_csv("./submit.csv", index=False)
