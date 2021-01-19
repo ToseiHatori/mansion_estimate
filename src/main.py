@@ -170,6 +170,14 @@ def preprocess(train_df, test_df):
     train_df = train_df.drop(unuse_columns, axis=1)
     test_df = test_df.drop(unuse_columns, axis=1)
 
+    # target encoding
+    for col in ["pref", "pref_city", "pref_city_district"]:
+        te_df = train_df.groupby([col, "base_year"])["y"].mean().reset_index(drop=False)
+        te_df = te_df.rename(columns={"y": f"te_{col}"})
+        te_df["base_year"] = te_df["base_year"] + 1
+        train_df = train_df.merge(te_df, on=[col, "base_year"], how="left")
+        test_df = test_df.merge(te_df, on=[col, "base_year"], how="left")
+
     # label encoding
     category_columns = [
         "pref",
@@ -187,9 +195,6 @@ def preprocess(train_df, test_df):
     ce_oe = ce.OrdinalEncoder()
     train_df.loc[:, category_columns] = ce_oe.fit_transform(train_df[category_columns])
     test_df.loc[:, category_columns] = ce_oe.transform(test_df[category_columns])
-
-    # 古いデータを削ってみる
-    train_df = train_df[train_df["base_year"] >= 2012].reset_index(drop=True)
 
     logger.debug(f"train head : {train_df.head()}")
     logger.debug(f"test head : {test_df.head()}")
@@ -345,7 +350,11 @@ if __name__ == "__main__":
     train_df, test_df = preprocess(train_df, test_df)
 
     logger.info("training data")
-    predictors = [x for x in train_df.columns if x not in ["ID", "y", "base_year", "floor_area_ratio"]]
+    predictors = [
+        x
+        for x in train_df.columns
+        if x not in ["ID", "y", "base_year", "floor_area_ratio", "te_pref", "te_pref_city", "te_pref_city_district"]
+    ]
     logger.debug(f"predictors: {predictors}")
     if debug:
         n_splits = 2
