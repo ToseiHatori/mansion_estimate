@@ -350,7 +350,11 @@ if __name__ == "__main__":
     train_df, test_df = preprocess(train_df, test_df)
 
     logger.info("training data")
-    predictors = [x for x in train_df.columns if x not in ["ID", "y", "base_year", "floor_area_ratio"]]
+    predictors = [
+        x
+        for x in train_df.columns
+        if x not in ["ID", "y", "base_year", "floor_area_ratio", "te_pref", "te_pref_city", "te_pref_city_district"]
+    ]
     logger.debug(f"predictors: {predictors}")
     if debug:
         n_splits = 2
