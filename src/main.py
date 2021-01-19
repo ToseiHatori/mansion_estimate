@@ -428,7 +428,7 @@ class MLPTrainer(GroupKfoldTrainer):
         torch.backends.cudnn.benchmark = True
         self.criterion = nn.L1Loss()
         best_score = 1000
-        for epoch in range(200):
+        for epoch in range(100):
             # train model...
             for train_batch in train_loader:
                 x, label = train_batch
@@ -469,9 +469,7 @@ class MLPTrainer(GroupKfoldTrainer):
                 best_score = val_loss
                 logger.debug(f"model updated. best score is {best_score}")
         print("\n")
-        if True:
-            plt.plot(val_loss_plot, label=str(self.fold_cnt))
-            # plt.ylim([0.015, 0.04])
+        logger.debug(f"NN result: {val_loss_plot}")
 
         # 一番良いところを持ってくる
         network.load_state_dict(best_model_wts)
@@ -481,7 +479,7 @@ class MLPTrainer(GroupKfoldTrainer):
     def _predict(self, model, X_valid):
         _X_valid = torch.Tensor(X_valid[self.predictors].values).to(self.device)
         preds = model.forward(_X_valid)
-        preds = preds.cpu().detach().numpy()
+        preds = preds.cpu().detach().numpy().reshape(-1)
         return preds
 
 
@@ -541,7 +539,12 @@ if __name__ == "__main__":
     test_df = df[df["is_train"] == 0].fillna(0).reset_index(drop=False)
     del df
     gc.collect()
-
+    if debug:
+        n_splits = 2
+        n_rsb = 1
+    else:
+        n_splits = 6
+        n_rsb = 1
     mlp_trainer = MLPTrainer(
         state_path="./models",
         predictors=predictors,
@@ -552,7 +555,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params={},
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
+        categorical_cols=[],
     )
     # submit
     sample_submission["取引価格（総額）_log"] = mlp_trainer.pred
