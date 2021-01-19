@@ -368,15 +368,19 @@ class MLPModel(nn.Module):
     def __init__(self, input_dim):
         super(MLPModel, self).__init__()
         self.sq1 = nn.Sequential(
-            nn.Linear(input_dim, 1024),
-            nn.BatchNorm1d(1024),
+            nn.Linear(input_dim, 512),
+            nn.BatchNorm1d(512),
             nn.Dropout(0.5),
             nn.ReLU(),
-            nn.Linear(1024, 1024),
-            nn.BatchNorm1d(1024),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
             nn.Dropout(0.5),
             nn.ReLU(),
-            nn.Linear(1024, 1),
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.Dropout(0.5),
+            nn.ReLU(),
+            nn.Linear(128, 1),
         )
 
     def forward(self, x):
@@ -410,7 +414,7 @@ class MLPTrainer(GroupKfoldTrainer):
         # numpy array -> data loader
         train_set = MEDataset(is_train=True, feature=_X_train, labels=_Y_train)
         train_loader = DataLoader(
-            train_set, batch_size=5000, shuffle=True, num_workers=0, pin_memory=True, drop_last=True
+            train_set, batch_size=1024, shuffle=True, num_workers=0, pin_memory=True, drop_last=True
         )
         val_set = MEDataset(is_train=True, feature=_X_valid, labels=_Y_valid)
         val_loader = DataLoader(val_set, batch_size=1024, num_workers=0, pin_memory=False, drop_last=False)
@@ -548,7 +552,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params={},
-        categorical_cols=[],
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
     # submit
     sample_submission["取引価格（総額）_log"] = mlp_trainer.pred
