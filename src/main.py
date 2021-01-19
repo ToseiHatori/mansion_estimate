@@ -189,7 +189,7 @@ def preprocess(train_df, test_df):
     test_df.loc[:, category_columns] = ce_oe.transform(test_df[category_columns])
 
     # 古いデータを削ってみる
-    train_df = train_df[train_df["base_year"] >= 2012].reset_index(drop=True)
+    # train_df = train_df[train_df["base_year"] >= 2012].reset_index(drop=True)
 
     logger.debug(f"train head : {train_df.head()}")
     logger.debug(f"test head : {test_df.head()}")
