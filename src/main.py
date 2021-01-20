@@ -1,3 +1,11 @@
+"""
+# colab
+from google.colab import drive
+drive.mount('/content/drive/')
+%cd "/content/drive/My Drive/data/"
+!pip install category-encoders
+!pip install jeraconv
+"""
 import argparse
 import copy
 import datetime
@@ -33,14 +41,9 @@ dt_now = dt_now.strftime("%Y%m%d_%H:%M")
 gc.enable()
 pd.options.display.max_columns = None
 
-# branch名の取得
-_cmd = "git rev-parse --abbrev-ref HEAD"
-branch = subprocess.check_output(_cmd.split()).strip().decode("utf-8")
-branch = "-".join(branch.split("/"))
-
 # 流石にロガーはglobalを使うぞ
 formatter = "%(levelname)s : %(asctime)s : %(message)s"
-logging.basicConfig(level=logging.DEBUG, format=formatter, filename=f"log/logger_{dt_now}_{branch}.log")
+logging.basicConfig(level=logging.DEBUG, format=formatter, filename=f"log/logger_{dt_now}.log")
 logger = logging.getLogger(__name__)
 
 
@@ -224,7 +227,7 @@ class GroupKfoldTrainer(object):
         self.validation_score = []
         self.folds = []
         self.state_path = Path(state_path)
-        self.file_path = self.state_path.joinpath(f"{self.name}_{branch}_{dt_now}.pickle")
+        self.file_path = self.state_path.joinpath(f"{self.name}_{dt_now}.pickle")
         # 無法者なのでここで呼んじゃう
         self.fit()
         self.save()
@@ -368,7 +371,11 @@ class MLPModel(nn.Module):
     def __init__(self, input_dim):
         super(MLPModel, self).__init__()
         self.sq1 = nn.Sequential(
-            nn.Linear(input_dim, 512),
+            nn.Linear(input_dim, 1024),
+            nn.BatchNorm1d(1024),
+            nn.Dropout(0.5),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
             nn.BatchNorm1d(512),
             nn.Dropout(0.5),
             nn.ReLU(),
@@ -376,11 +383,7 @@ class MLPModel(nn.Module):
             nn.BatchNorm1d(256),
             nn.Dropout(0.5),
             nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.Dropout(0.5),
-            nn.ReLU(),
-            nn.Linear(128, 1),
+            nn.Linear(256, 1),
         )
 
     def forward(self, x):
@@ -421,7 +424,7 @@ class MLPTrainer(GroupKfoldTrainer):
 
         # create network, optimizer, scheduler
         network = MLPModel(_X_train.shape[1])
-        optimizer = Adam(network.parameters(), lr=1e-3)
+        optimizer = Adam(network.parameters(), lr=1e-1)
         scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=10, verbose=True)
         val_loss_plot = []
         # begin training...
