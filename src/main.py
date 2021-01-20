@@ -348,9 +348,12 @@ class LGBTrainer(GroupKfoldTrainer):
 
 
 class MEDataset(Dataset):
-    def __init__(self, is_train, feature, labels):
+    def __init__(self, is_train, feature, labels, pref, city, district):
         self.is_train = is_train
         self.feature = feature
+        self.pref = pref
+        self.city = city
+        self.district = district
         self.labels = labels
 
     def __len__(self):
@@ -359,17 +362,23 @@ class MEDataset(Dataset):
     def __getitem__(self, idx):
         features = self.feature[idx]
         features = torch.Tensor(features)
+        pref = torch.LongTensor(self.pref[idx])
+        city = torch.LongTensor(self.city[idx])
+        district = torch.LongTensor(self.district[idx])
         if not self.is_train:
-            return features
+            return features, pref, city, district
         else:
             y = self.labels[idx]
             y = torch.Tensor([y])
-            return features, y
+            return features, pref, city, district, y
 
 
 class MLPModel(nn.Module):
     def __init__(self, input_dim):
         super(MLPModel, self).__init__()
+        self.emb_pref = nn.Sequential(nn.Embedding(vocab_size=42, emb_dim=20), nn.Dropout(0.8))
+        self.emb_city = nn.Sequential(nn.Embedding(vocab_size=618, emb_dim=300), nn.Dropout(0.8))
+        self.emb_district = nn.Sequential(nn.Embedding(vocab_size=15418, emb_dim=1000), nn.Dropout(0.8))
         self.sq1 = nn.Sequential(
             nn.Linear(input_dim, 1024),
             nn.BatchNorm1d(1024),
@@ -386,8 +395,12 @@ class MLPModel(nn.Module):
             nn.Linear(256, 1),
         )
 
-    def forward(self, x):
-        ret = self.sq1(x)
+    def forward(self, x, pref, city, district):
+        y1 = self.emb_pref(pref)
+        y2 = self.emb_city(city)
+        y3 = self.emb_district(district)
+        y = torch.cat((x, y1, y2, y3), dim=1)
+        ret = self.sq1(y)
         return ret
 
 
