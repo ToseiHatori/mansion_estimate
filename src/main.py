@@ -405,7 +405,7 @@ class MLPModel(nn.Module):
             nn.Linear(pref_dim + city_dim + district_dim, 1024),
             nn.Linear(1024, 1024),
             nn.PReLU(),
-            nn.BatchNorm1d(district_dim),
+            nn.BatchNorm1d(1024),
             nn.Dropout(0.5),
         )
         self.sq2 = nn.Sequential(
@@ -425,10 +425,10 @@ class MLPModel(nn.Module):
         )
 
     def forward(self, x, pref, city, district):
-        y1 = torch.squeeze(self.emb_pref(pref))
-        y2 = torch.squeeze(self.emb_city(city))
-        y3 = torch.squeeze(self.emb_district(district))
-        y = torch.cat((x, y1, y2, y3), dim=1)
+        y1 = self.emb_pref(pref.reshape(-1))
+        y2 = self.emb_city(city.reshape(-1))
+        y3 = self.emb_district(district.reshape(-1))
+        y = torch.cat((y1, y2, y3), dim=1)
         y = self.sq1(y)
         y = torch.cat((x, y), dim=1)
         y = self.sq2(y)
