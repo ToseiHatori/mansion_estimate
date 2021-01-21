@@ -17,6 +17,7 @@ import pickle
 import random
 import re
 import subprocess
+from typing import List, Dict
 from pathlib import Path
 
 import category_encoders as ce
@@ -362,9 +363,9 @@ class MEDataset(Dataset):
     def __getitem__(self, idx):
         features = self.feature[idx]
         features = torch.Tensor(features)
-        pref = torch.LongTensor(self.pref[idx])
-        city = torch.LongTensor(self.city[idx])
-        district = torch.LongTensor(self.district[idx])
+        pref = torch.LongTensor([self.pref[idx]])
+        city = torch.LongTensor([self.city[idx]])
+        district = torch.LongTensor([self.district[idx]])
         if not self.is_train:
             return features, pref, city, district
         else:
@@ -376,11 +377,16 @@ class MEDataset(Dataset):
 class MLPModel(nn.Module):
     def __init__(self, input_dim):
         super(MLPModel, self).__init__()
-        self.emb_pref = nn.Sequential(nn.Embedding(vocab_size=42, emb_dim=20), nn.Dropout(0.8))
-        self.emb_city = nn.Sequential(nn.Embedding(vocab_size=618, emb_dim=300), nn.Dropout(0.8))
-        self.emb_district = nn.Sequential(nn.Embedding(vocab_size=15418, emb_dim=1000), nn.Dropout(0.8))
+        pref_dim = 20
+        city_dim = 300
+        district_dim = 5000
+        self.emb_pref = nn.Sequential(nn.Embedding(num_embeddings=42, embedding_dim=pref_dim), nn.Dropout(0.8))
+        self.emb_city = nn.Sequential(nn.Embedding(num_embeddings=618, embedding_dim=city_dim), nn.Dropout(0.8))
+        self.emb_district = nn.Sequential(
+            nn.Embedding(num_embeddings=15418, embedding_dim=district_dim), nn.Dropout(0.8)
+        )
         self.sq1 = nn.Sequential(
-            nn.Linear(input_dim, 1024),
+            nn.Linear(input_dim + pref_dim + city_dim + district_dim, 1024),
             nn.BatchNorm1d(1024),
             nn.Dropout(0.5),
             nn.ReLU(),
@@ -396,9 +402,9 @@ class MLPModel(nn.Module):
         )
 
     def forward(self, x, pref, city, district):
-        y1 = self.emb_pref(pref)
-        y2 = self.emb_city(city)
-        y3 = self.emb_district(district)
+        y1 = torch.squeeze(self.emb_pref(pref))
+        y2 = torch.squeeze(self.emb_city(city))
+        y3 = torch.squeeze(self.emb_district(district))
         y = torch.cat((x, y1, y2, y3), dim=1)
         ret = self.sq1(y)
         return ret
@@ -408,6 +414,8 @@ class MLPTrainer(GroupKfoldTrainer):
     def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.categorical_cols = categorical_cols
+        self.numeric_cols = [x for x in predictors if x not in categorical_cols]
+        X, test = self.preprocess(X, test, self.numeric_cols)
         self.params = params
         super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
 
@@ -415,29 +423,63 @@ class MLPTrainer(GroupKfoldTrainer):
         importance = pd.DataFrame({"features": [], "importance": []})
         return importance
 
+    @staticmethod
+    def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
+        logger.info("scaling...")
+        transformer = MinMaxScaler()
+        train_df["is_train"] = 1
+        test_df["is_train"] = 0
+        df = pd.concat([train_df, test_df], axis=0).reset_index(drop=True)
+        df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
+        train_df = df[df["is_train"] == 1].fillna(0).drop("is_train", axis=1).reset_index(drop=False)
+        test_df = df[df["is_train"] == 0].fillna(0).drop("is_train", axis=1).reset_index(drop=False)
+        del df
+        gc.collect()
+        return train_df, test_df
+
     def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
         set_seed(loop_seed)
         # preprocess
         # DataFrame -> numpy array
-        _X_train = X_train.values.copy()
-        _X_valid = X_valid.values.copy()
+        _X_train = X_train[self.numeric_cols].values.copy()
+        _X_valid = X_valid[self.numeric_cols].values.copy()
         _Y_train = Y_train.values.copy()
         _Y_valid = Y_valid.values.copy()
+        _X_train_pref = X_train["pref"].astype(int).values.copy()
+        _X_train_city = X_train["pref_city"].astype(int).values.copy()
+        _X_train_district = X_train["pref_city_district"].astype(int).values.copy()
+        _X_valid_pref = X_valid["pref"].astype(int).values.copy()
+        _X_valid_city = X_valid["pref_city"].astype(int).values.copy()
+        _X_valid_district = X_valid["pref_city_district"].astype(int).values.copy()
 
         # train
         ret = dict()
 
         # numpy array -> data loader
-        train_set = MEDataset(is_train=True, feature=_X_train, labels=_Y_train)
+        train_set = MEDataset(
+            is_train=True,
+            feature=_X_train,
+            labels=_Y_train,
+            pref=_X_train_pref,
+            city=_X_train_city,
+            district=_X_train_district,
+        )
         train_loader = DataLoader(
             train_set, batch_size=1024, shuffle=True, num_workers=0, pin_memory=True, drop_last=True
         )
-        val_set = MEDataset(is_train=True, feature=_X_valid, labels=_Y_valid)
+        val_set = MEDataset(
+            is_train=True,
+            feature=_X_valid,
+            labels=_Y_valid,
+            pref=_X_valid_pref,
+            city=_X_valid_city,
+            district=_X_valid_district,
+        )
         val_loader = DataLoader(val_set, batch_size=1024, num_workers=0, pin_memory=False, drop_last=False)
 
         # create network, optimizer, scheduler
         network = MLPModel(_X_train.shape[1])
-        optimizer = Adam(network.parameters(), lr=1e-1)
+        optimizer = Adam(network.parameters(), lr=1e-3)
         scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=10, verbose=True)
         val_loss_plot = []
         # begin training...
@@ -447,13 +489,16 @@ class MLPTrainer(GroupKfoldTrainer):
         for epoch in range(100):
             # train model...
             for train_batch in train_loader:
-                x, label = train_batch
+                x, pref, city, district, label = train_batch
                 x = x.to(self.device)
+                pref = pref.to(self.device)
+                city = city.to(self.device)
+                district = district.to(self.device)
                 label = label.to(self.device)
 
                 network.train()
                 network = network.to(self.device)
-                train_preds = network.forward(x)
+                train_preds = network.forward(x, pref, city, district)
                 train_loss = self.criterion(train_preds, label)
                 optimizer.zero_grad()
                 train_loss.backward()
@@ -463,13 +508,16 @@ class MLPTrainer(GroupKfoldTrainer):
             network.eval()
             val_preds, val_targs = [], []
             for val_batch in val_loader:
-                x, label = val_batch
+                x, pref, city, district, label = val_batch
                 with torch.no_grad():
                     x = x.to(self.device)
+                    pref = pref.to(self.device)
+                    city = city.to(self.device)
+                    district = district.to(self.device)
                     label = label.to(self.device)
                     network = network.to(self.device)
 
-                    val_preds.append(network.forward(x))
+                    val_preds.append(network.forward(x, pref, city, district))
                     val_targs.append(label)
             val_preds = torch.cat(val_preds, axis=0)
             val_targs = torch.cat(val_targs, axis=0)
@@ -492,9 +540,12 @@ class MLPTrainer(GroupKfoldTrainer):
         ret["model"] = network
         return ret
 
-    def _predict(self, model, X_valid):
-        _X_valid = torch.Tensor(X_valid[self.predictors].values).to(self.device)
-        preds = model.forward(_X_valid)
+    def _predict(self, model, X):
+        _X_valid = torch.Tensor(X[self.numeric_cols].values).to(self.device)
+        pref = torch.LongTensor(X["pref"].astype(int).values).to(self.device)
+        city = torch.LongTensor(X["pref_city"].astype(int).values).to(self.device)
+        district = torch.LongTensor(X["pref_city_district"].values).to(self.device)
+        preds = model.forward(_X_valid, pref, city, district)
         preds = preds.cpu().detach().numpy().reshape(-1)
         return preds
 
@@ -544,17 +595,6 @@ if __name__ == "__main__":
     #    params=params,
     #    categorical_cols=["pref", "pref_city", "pref_city_district", "remodeling"],
     # )
-    # 前処理
-    logger.info("scaling...")
-    transformer = MinMaxScaler()
-    train_df["is_train"] = 1
-    test_df["is_train"] = 0
-    df = pd.concat([train_df, test_df], axis=0).reset_index(drop=True)
-    df[predictors] = transformer.fit_transform(df[predictors])
-    train_df = df[df["is_train"] == 1].fillna(0).reset_index(drop=False)
-    test_df = df[df["is_train"] == 0].fillna(0).reset_index(drop=False)
-    del df
-    gc.collect()
     if debug:
         n_splits = 2
         n_rsb = 1
