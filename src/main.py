@@ -379,14 +379,37 @@ class MLPModel(nn.Module):
         super(MLPModel, self).__init__()
         pref_dim = 20
         city_dim = 300
-        district_dim = 1000
-        self.emb_pref = nn.Sequential(nn.Embedding(num_embeddings=42, embedding_dim=pref_dim), nn.Dropout(0.8))
-        self.emb_city = nn.Sequential(nn.Embedding(num_embeddings=618, embedding_dim=city_dim), nn.Dropout(0.8))
+        district_dim = 5000
+        self.emb_pref = nn.Sequential(
+            nn.Embedding(num_embeddings=42, embedding_dim=pref_dim),
+            nn.Linear(pref_dim, pref_dim),
+            nn.PReLU(),
+            nn.BatchNorm1d(pref_dim),
+            nn.Dropout(0.5),
+        )
+        self.emb_city = nn.Sequential(
+            nn.Embedding(num_embeddings=618, embedding_dim=city_dim),
+            nn.Linear(city_dim, city_dim),
+            nn.PReLU(),
+            nn.BatchNorm1d(city_dim),
+            nn.Dropout(0.5),
+        )
         self.emb_district = nn.Sequential(
-            nn.Embedding(num_embeddings=15418, embedding_dim=district_dim), nn.Dropout(0.8)
+            nn.Embedding(num_embeddings=15418, embedding_dim=district_dim),
+            nn.Linear(district_dim, district_dim),
+            nn.PReLU(),
+            nn.BatchNorm1d(district_dim),
+            nn.Dropout(0.5),
         )
         self.sq1 = nn.Sequential(
-            nn.Linear(input_dim + pref_dim + city_dim + district_dim, 1024),
+            nn.Linear(pref_dim + city_dim + district_dim, 1024),
+            nn.Linear(1024, 1024),
+            nn.PReLU(),
+            nn.BatchNorm1d(district_dim),
+            nn.Dropout(0.5),
+        )
+        self.sq2 = nn.Sequential(
+            nn.Linear(input_dim + 1024, 1024),
             nn.BatchNorm1d(1024),
             nn.Dropout(0.5),
             nn.ReLU(),
@@ -406,8 +429,10 @@ class MLPModel(nn.Module):
         y2 = torch.squeeze(self.emb_city(city))
         y3 = torch.squeeze(self.emb_district(district))
         y = torch.cat((x, y1, y2, y3), dim=1)
-        ret = self.sq1(y)
-        return ret
+        y = self.sq1(y)
+        y = torch.cat((x, y), dim=1)
+        y = self.sq2(y)
+        return y
 
 
 class MLPTrainer(GroupKfoldTrainer):
@@ -595,6 +620,9 @@ if __name__ == "__main__":
     #    params=params,
     #    categorical_cols=["pref", "pref_city", "pref_city_district", "remodeling"],
     # )
+    predictors = [
+        x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
+    ]
     if debug:
         n_splits = 2
         n_rsb = 1
