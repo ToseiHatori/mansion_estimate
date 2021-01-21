@@ -377,43 +377,39 @@ class MEDataset(Dataset):
 class MLPModel(nn.Module):
     def __init__(self, input_dim):
         super(MLPModel, self).__init__()
-        pref_dim = 20
-        city_dim = 300
-        district_dim = 5000
+        pref_dim = 10
+        city_dim = 100
+        district_dim = 1000
         self.emb_pref = nn.Sequential(
             nn.Embedding(num_embeddings=42, embedding_dim=pref_dim),
-            nn.Linear(pref_dim, pref_dim),
-            nn.PReLU(),
-            nn.BatchNorm1d(pref_dim),
-            nn.Dropout(0.5),
+            # nn.Linear(pref_dim, pref_dim),
+            # nn.PReLU(),
+            # nn.BatchNorm1d(pref_dim),
+            # nn.Dropout(0.5),
         )
         self.emb_city = nn.Sequential(
             nn.Embedding(num_embeddings=618, embedding_dim=city_dim),
-            nn.Linear(city_dim, city_dim),
-            nn.PReLU(),
-            nn.BatchNorm1d(city_dim),
-            nn.Dropout(0.5),
+            # nn.Linear(city_dim, city_dim),
+            # nn.PReLU(),
+            # nn.BatchNorm1d(city_dim),
+            # nn.Dropout(0.5),
         )
         self.emb_district = nn.Sequential(
             nn.Embedding(num_embeddings=15418, embedding_dim=district_dim),
-            nn.Linear(district_dim, district_dim),
-            nn.PReLU(),
-            nn.BatchNorm1d(district_dim),
-            nn.Dropout(0.5),
+            # nn.Linear(district_dim, district_dim),
+            # nn.PReLU(),
+            # nn.BatchNorm1d(district_dim),
+            # nn.Dropout(0.5),
         )
         self.sq1 = nn.Sequential(
-            nn.Linear(pref_dim + city_dim + district_dim, 1024),
-            nn.Linear(1024, 1024),
-            nn.PReLU(),
-            nn.BatchNorm1d(1024),
-            nn.Dropout(0.5),
+            nn.Linear(pref_dim + city_dim + district_dim, 100),
+            # nn.Linear(1024, 1024),
+            # nn.PReLU(),
+            # nn.BatchNorm1d(1024),
+            # nn.Dropout(0.5),
         )
         self.sq2 = nn.Sequential(
-            nn.Linear(input_dim + 1024, 1024),
-            nn.BatchNorm1d(1024),
-            nn.Dropout(0.5),
-            nn.ReLU(),
-            nn.Linear(1024, 512),
+            nn.Linear(input_dim + 100, 512),
             nn.BatchNorm1d(512),
             nn.Dropout(0.5),
             nn.ReLU(),
@@ -491,7 +487,7 @@ class MLPTrainer(GroupKfoldTrainer):
             district=_X_train_district,
         )
         train_loader = DataLoader(
-            train_set, batch_size=1024, shuffle=True, num_workers=0, pin_memory=True, drop_last=True
+            train_set, batch_size=1024, shuffle=True, num_workers=0
         )
         val_set = MEDataset(
             is_train=True,
@@ -501,7 +497,7 @@ class MLPTrainer(GroupKfoldTrainer):
             city=_X_valid_city,
             district=_X_valid_district,
         )
-        val_loader = DataLoader(val_set, batch_size=1024, num_workers=0, pin_memory=False, drop_last=False)
+        val_loader = DataLoader(val_set, batch_size=1024, num_workers=0)
 
         # create network, optimizer, scheduler
         network = MLPModel(_X_train.shape[1])
@@ -640,7 +636,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params={},
-        categorical_cols=[],
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
     # submit
     sample_submission["取引価格（総額）_log"] = mlp_trainer.pred
