@@ -30,7 +30,7 @@ import torch.nn as nn
 from jeraconv import jeraconv
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, RobustScaler
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
@@ -451,7 +451,8 @@ class MLPTrainer(GroupKfoldTrainer):
     @staticmethod
     def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
         logger.info("scaling...")
-        transformer = MinMaxScaler()
+        # transformer = MinMaxScaler()
+        transformer = RobustScaler()
         train_df["is_train"] = 1
         test_df["is_train"] = 0
         df = pd.concat([train_df, test_df], axis=0).reset_index(drop=True)
@@ -548,7 +549,7 @@ class MLPTrainer(GroupKfoldTrainer):
             val_targs = torch.cat(val_targs, axis=0)
             val_loss = self.criterion(val_preds, val_targs).cpu().detach().numpy()
             scheduler.step(val_loss)
-            print(f"\r val_loss {val_loss} epoch {epoch}", end="")
+            print(f"epoch {epoch:0>4}: val_loss {val_loss}")
             val_loss_plot.append(float(val_loss))
 
             # モデルを保存
@@ -556,7 +557,7 @@ class MLPTrainer(GroupKfoldTrainer):
                 # モデルそのものを保存すると参照渡しになるので、わざわざ重みをコピーしてあとで入れるみたいなことをしている。
                 best_model_wts = copy.deepcopy(network.state_dict())
                 best_score = val_loss
-                logger.debug(f"model updated. best score is {best_score}")
+                print(f"model updated. best score is {best_score}")
         print("\n")
         logger.debug(f"NN result: {val_loss_plot}")
 
@@ -569,7 +570,7 @@ class MLPTrainer(GroupKfoldTrainer):
         _X_valid = torch.Tensor(X[self.numeric_cols].values).to(self.device)
         pref = torch.LongTensor(X["pref"].astype(int).values).to(self.device)
         city = torch.LongTensor(X["pref_city"].astype(int).values).to(self.device)
-        district = torch.LongTensor(X["pref_city_district"].values).to(self.device)
+        district = torch.LongTensor(X["pref_city_district"].astype(int).values).to(self.device)
         preds = model.forward(_X_valid, pref, city, district)
         preds = preds.cpu().detach().numpy().reshape(-1)
         return preds
