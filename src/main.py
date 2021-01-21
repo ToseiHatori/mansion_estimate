@@ -379,7 +379,7 @@ class MLPModel(nn.Module):
         super(MLPModel, self).__init__()
         pref_dim = 20
         city_dim = 300
-        district_dim = 5000
+        district_dim = 1000
         self.emb_pref = nn.Sequential(nn.Embedding(num_embeddings=42, embedding_dim=pref_dim), nn.Dropout(0.8))
         self.emb_city = nn.Sequential(nn.Embedding(num_embeddings=618, embedding_dim=city_dim), nn.Dropout(0.8))
         self.emb_district = nn.Sequential(
