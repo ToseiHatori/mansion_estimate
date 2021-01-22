@@ -17,10 +17,11 @@ import pickle
 import random
 import re
 import subprocess
-from typing import List, Dict
 from pathlib import Path
+from typing import Dict, List
 
 import category_encoders as ce
+import feather
 import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
@@ -486,9 +487,7 @@ class MLPTrainer(GroupKfoldTrainer):
             city=_X_train_city,
             district=_X_train_district,
         )
-        train_loader = DataLoader(
-            train_set, batch_size=1024, shuffle=True, num_workers=0
-        )
+        train_loader = DataLoader(train_set, batch_size=1024, shuffle=True, num_workers=0)
         val_set = MEDataset(
             is_train=True,
             feature=_X_valid,
@@ -575,15 +574,29 @@ class MLPTrainer(GroupKfoldTrainer):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug")
+    parser.add_argument("--update_dm")
     args = parser.parse_args()
     debug = args.debug
+    update_dm = args.update_dm
+    if update_dm is None:
+        update_dm = False
+    if debug is None:
+        debug = False
     logger.info(f"debug mode {debug}")
+    logger.info(f"update dm  {update_dm}")
 
-    logger.info("loading data")
-    train_df, test_df, sample_submission = get_data()
-
-    logger.info("preprocessing data")
-    train_df, test_df = preprocess(train_df, test_df)
+    train_df_path = "./data/processed/train_df.feather"
+    test_df_path = "./data/processed/test_df.feather"
+    if (not os.path.exists(train_df_path)) | update_dm:
+        logger.info("loading data")
+        train_df, test_df, sample_submission = get_data()
+        logger.info("preprocessing data")
+        train_df, test_df = preprocess(train_df, test_df)
+        feather.write_dataframe(train_df, train_df_path)
+        feather.write_dataframe(test_df, test_df_path)
+    else:
+        train_df = feather.read_dataframe(train_df_path)
+        test_df = feather.read_dataframe(test_df_path)
 
     logger.info("training data")
     predictors = [
