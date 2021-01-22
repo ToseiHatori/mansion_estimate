@@ -55,7 +55,7 @@ def set_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.deterministic = False
 
 
 def get_data():
@@ -382,21 +382,21 @@ class MLPModel(nn.Module):
         city_dim = 100
         district_dim = 1000
         self.emb_pref = nn.Sequential(
-            nn.Embedding(num_embeddings=42, embedding_dim=pref_dim),
+            nn.Embedding(num_embeddings=48, embedding_dim=pref_dim),
             # nn.Linear(pref_dim, pref_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(pref_dim),
             # nn.Dropout(0.5),
         )
         self.emb_city = nn.Sequential(
-            nn.Embedding(num_embeddings=618, embedding_dim=city_dim),
+            nn.Embedding(num_embeddings=619, embedding_dim=city_dim),
             # nn.Linear(city_dim, city_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(city_dim),
             # nn.Dropout(0.5),
         )
         self.emb_district = nn.Sequential(
-            nn.Embedding(num_embeddings=15418, embedding_dim=district_dim),
+            nn.Embedding(num_embeddings=15419, embedding_dim=district_dim),
             # nn.Linear(district_dim, district_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(district_dim),
@@ -422,9 +422,9 @@ class MLPModel(nn.Module):
         )
 
     def forward(self, x, pref, city, district):
-        y1 = self.emb_pref(pref.reshape(-1))
-        y2 = self.emb_city(city.reshape(-1))
-        y3 = self.emb_district(district.reshape(-1))
+        y1 = self.emb_pref(pref.view(-1))
+        y2 = self.emb_city(city.view(-1))
+        y3 = self.emb_district(district.view(-1))
         y = torch.cat((y1, y2, y3), dim=1)
         y = self.sq1(y)
         y = torch.cat((x, y), dim=1)
@@ -496,7 +496,7 @@ class MLPTrainer(GroupKfoldTrainer):
             city=_X_valid_city,
             district=_X_valid_district,
         )
-        val_loader = DataLoader(val_set, batch_size=1024, num_workers=0)
+        val_loader = DataLoader(val_set, batch_size=10240, num_workers=0)
 
         # create network, optimizer, scheduler
         network = MLPModel(_X_train.shape[1])
