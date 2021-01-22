@@ -5,6 +5,7 @@ drive.mount('/content/drive/')
 %cd "/content/drive/My Drive/data/"
 !pip install category-encoders
 !pip install jeraconv
+!export CUDA_LAUNCH_BLOCKING=1 
 """
 import argparse
 import copy
