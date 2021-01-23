@@ -503,7 +503,7 @@ class MLPTrainer(GroupKfoldTrainer):
             district=_X_train_district,
             station=_X_train_station,
         )
-        train_loader = DataLoader(train_set, batch_size=1024, shuffle=True, num_workers=0)
+        train_loader = DataLoader(train_set, batch_size=self.params["batch_size"], shuffle=True, num_workers=0)
         val_set = MEDataset(
             is_train=True,
             feature=_X_valid,
@@ -517,14 +517,16 @@ class MLPTrainer(GroupKfoldTrainer):
 
         # create network, optimizer, scheduler
         network = MLPModel(_X_train.shape[1])
-        optimizer = Adam(network.parameters(), lr=1e-3)
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=10, verbose=True)
+        optimizer = Adam(network.parameters(), lr=self.params["lr"])
+        scheduler = ReduceLROnPlateau(
+            optimizer, mode="min", factor=self.params["factor"], patience=self.params["patience"], verbose=True
+        )
         val_loss_plot = []
         # begin training...
         torch.backends.cudnn.benchmark = True
         self.criterion = nn.L1Loss()
-        best_score = 1000
-        for epoch in range(1):
+        best_score = 100000
+        for epoch in range(self.params["n_epoch"]):
             # train model...
             for train_batch in train_loader:
                 x, pref, city, district, station, label = train_batch
@@ -683,7 +685,7 @@ if __name__ == "__main__":
         test=test_df,
         n_splits=n_splits,
         n_rsb=n_rsb,
-        params={},
+        params={"n_epoch": 100, "lr": 1e-3, "batch_size": 1024, "patience": 10, "factor": 0.1},
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     # submit
