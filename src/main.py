@@ -352,12 +352,13 @@ class LGBTrainer(GroupKfoldTrainer):
 
 
 class MEDataset(Dataset):
-    def __init__(self, is_train, feature, labels, pref, city, district):
+    def __init__(self, is_train, feature, labels, pref, city, district, station):
         self.is_train = is_train
         self.feature = feature
         self.pref = pref
         self.city = city
         self.district = district
+        self.station = station
         self.labels = labels
 
     def __len__(self):
@@ -369,12 +370,13 @@ class MEDataset(Dataset):
         pref = torch.LongTensor([self.pref[idx]])
         city = torch.LongTensor([self.city[idx]])
         district = torch.LongTensor([self.district[idx]])
+        station = torch.LongTensor([self.station[idx]])
         if not self.is_train:
-            return features, pref, city, district
+            return features, pref, city, district, station
         else:
             y = self.labels[idx]
             y = torch.Tensor([y])
-            return features, pref, city, district, y
+            return features, pref, city, district, station, y
 
 
 class MLPModel(nn.Module):
@@ -383,6 +385,7 @@ class MLPModel(nn.Module):
         pref_dim = 10
         city_dim = 100
         district_dim = 1000
+        station_dim = 100
         self.emb_pref = nn.Sequential(
             nn.Embedding(num_embeddings=48, embedding_dim=pref_dim),
             # nn.Linear(pref_dim, pref_dim),
@@ -404,8 +407,15 @@ class MLPModel(nn.Module):
             # nn.BatchNorm1d(district_dim),
             # nn.Dropout(0.5),
         )
+        self.emb_station = nn.Sequential(
+            nn.Embedding(num_embeddings=3833, embedding_dim=station_dim),
+            # nn.Linear(station_dim, station_dim),
+            # nn.PReLU(),
+            # nn.BatchNorm1d(station_dim),
+            # nn.Dropout(0.5),
+        )
         self.sq1 = nn.Sequential(
-            nn.Linear(pref_dim + city_dim + district_dim, 100),
+            nn.Linear(pref_dim + city_dim + district_dim + station_dim, 100),
             # nn.Linear(1024, 1024),
             # nn.PReLU(),
             # nn.BatchNorm1d(1024),
@@ -423,11 +433,12 @@ class MLPModel(nn.Module):
             nn.Linear(256, 1),
         )
 
-    def forward(self, x, pref, city, district):
+    def forward(self, x, pref, city, district, station):
         y1 = self.emb_pref(pref.view(-1))
         y2 = self.emb_city(city.view(-1))
         y3 = self.emb_district(district.view(-1))
-        y = torch.cat((y1, y2, y3), dim=1)
+        y4 = self.emb_station(station.view(-1))
+        y = torch.cat((y1, y2, y3, y4), dim=1)
         y = self.sq1(y)
         y = torch.cat((x, y), dim=1)
         y = self.sq2(y)
@@ -473,9 +484,11 @@ class MLPTrainer(GroupKfoldTrainer):
         _X_train_pref = X_train["pref"].astype(int).values.copy()
         _X_train_city = X_train["pref_city"].astype(int).values.copy()
         _X_train_district = X_train["pref_city_district"].astype(int).values.copy()
+        _X_train_station = X_train["station"].astype(int).values.copy()
         _X_valid_pref = X_valid["pref"].astype(int).values.copy()
         _X_valid_city = X_valid["pref_city"].astype(int).values.copy()
         _X_valid_district = X_valid["pref_city_district"].astype(int).values.copy()
+        _X_valid_station = X_valid["station"].astype(int).values.copy()
 
         # train
         ret = dict()
@@ -488,6 +501,7 @@ class MLPTrainer(GroupKfoldTrainer):
             pref=_X_train_pref,
             city=_X_train_city,
             district=_X_train_district,
+            station=_X_train_station,
         )
         train_loader = DataLoader(train_set, batch_size=1024, shuffle=True, num_workers=0)
         val_set = MEDataset(
@@ -497,6 +511,7 @@ class MLPTrainer(GroupKfoldTrainer):
             pref=_X_valid_pref,
             city=_X_valid_city,
             district=_X_valid_district,
+            station=_X_valid_station,
         )
         val_loader = DataLoader(val_set, batch_size=10240, num_workers=0)
 
@@ -512,16 +527,17 @@ class MLPTrainer(GroupKfoldTrainer):
         for epoch in range(1):
             # train model...
             for train_batch in train_loader:
-                x, pref, city, district, label = train_batch
+                x, pref, city, district, station, label = train_batch
                 x = x.to(self.device)
                 pref = pref.to(self.device)
                 city = city.to(self.device)
                 district = district.to(self.device)
+                station = station.to(self.device)
                 label = label.to(self.device)
 
                 network.train()
                 network = network.to(self.device)
-                train_preds = network.forward(x, pref, city, district)
+                train_preds = network.forward(x, pref, city, district, station)
                 train_loss = self.criterion(train_preds, label)
                 optimizer.zero_grad()
                 train_loss.backward()
@@ -531,16 +547,17 @@ class MLPTrainer(GroupKfoldTrainer):
             network.eval()
             val_preds, val_targs = [], []
             for val_batch in val_loader:
-                x, pref, city, district, label = val_batch
+                x, pref, city, district, station, label = val_batch
                 with torch.no_grad():
                     x = x.to(self.device)
                     pref = pref.to(self.device)
                     city = city.to(self.device)
                     district = district.to(self.device)
+                    station = station.to(self.device)
                     label = label.to(self.device)
                     network = network.to(self.device)
 
-                    val_preds.append(network.forward(x, pref, city, district))
+                    val_preds.append(network.forward(x, pref, city, district, station))
                     val_targs.append(label)
             val_preds = torch.cat(val_preds, axis=0)
             val_targs = torch.cat(val_targs, axis=0)
@@ -571,7 +588,8 @@ class MLPTrainer(GroupKfoldTrainer):
             pref = torch.LongTensor(X["pref"].astype(int).values).to(self.device)
             city = torch.LongTensor(X["pref_city"].astype(int).values).to(self.device)
             district = torch.LongTensor(X["pref_city_district"].astype(int).values).to(self.device)
-            preds = model.forward(_X, pref, city, district).view(-1)
+            station = torch.LongTensor(X["station"].astype(int).values).to(self.device)
+            preds = model.forward(_X, pref, city, district, station).view(-1)
             preds = preds.to("cpu").detach().numpy().copy()
         return preds
 
@@ -612,6 +630,7 @@ if __name__ == "__main__":
         else:
             train_df = feather.read_dataframe(train_df_path)
             test_df = feather.read_dataframe(test_df_path)
+            sample_submission = pd.read_csv("./data/raw/sample_submission.csv")
 
     # logger.info("training data")
     # predictors = [
@@ -665,7 +684,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params={},
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     # submit
     sample_submission["取引価格（総額）_log"] = mlp_trainer.pred
