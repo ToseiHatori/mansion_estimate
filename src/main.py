@@ -165,8 +165,8 @@ def preprocess(train_df, test_df):
         df["floor_area_ratio_x_area"] = df["floor_area_ratio"] * df["area"]
         logger.debug(f"head : {df.head()}")
 
-    # 不要なカラム削除
-    unuse_columns = [
+    # null数
+    original_columns = [
         "都道府県名",
         "市区町村名",
         "地区名",
@@ -185,8 +185,12 @@ def preprocess(train_df, test_df):
         "取引時点",
         "取引の事情等",
     ]
-    train_df = train_df.drop(unuse_columns, axis=1)
-    test_df = test_df.drop(unuse_columns, axis=1)
+    train_df["null_num"] = train_df[original_columns].isnull().sum(axis=1)
+    test_df["null_num"] = test_df[original_columns].isnull().sum(axis=1)
+
+    # 不要なカラム削除
+    train_df = train_df.drop(original_columns, axis=1)
+    test_df = test_df.drop(original_columns, axis=1)
 
     # target encoding
     for col in ["pref", "pref_city", "pref_city_district"]:
@@ -464,16 +468,18 @@ class MLPTrainer(GroupKfoldTrainer):
 
     @staticmethod
     def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
+        # 駅徒歩だけは0埋めしない
+        train_df["time_to_station"] = train_df["time_to_station"].fillna(-1)
+        test_df["time_to_station"] = test_df["time_to_station"].fillna(-1)
+
         logger.info("scaling...")
         # transformer = MinMaxScaler()
         transformer = RobustScaler()
-        train_df["is_train"] = 1
-        test_df["is_train"] = 0
-        df = pd.concat([train_df, test_df], axis=0).reset_index(drop=True)
-        df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
-        train_df = df[df["is_train"] == 1].fillna(0).drop("is_train", axis=1).reset_index(drop=False)
-        test_df = df[df["is_train"] == 0].fillna(0).drop("is_train", axis=1).reset_index(drop=False)
-        del df
+        train_df[numeric_cols] = transformer.fit_transform(train_df[numeric_cols])
+        test_df[numeric_cols] = transformer.transform(test_df[numeric_cols])
+        # fillna
+        train_df[numeric_cols] = train_df[numeric_cols].fillna(0)
+        test_df[numeric_cols] = test_df[numeric_cols].fillna(0)
         gc.collect()
         return train_df, test_df
 
