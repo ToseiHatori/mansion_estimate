@@ -666,7 +666,7 @@ if __name__ == "__main__":
         "boosting_type": "gbdt",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "device": torch.device("gpu" if torch.cuda.is_available() else "cpu")
+        "device": [("gpu" if torch.cuda.is_available() else "cpu")][0],
         "verbosity": -1,
     }
     lgb_booster = LGBTrainer(
