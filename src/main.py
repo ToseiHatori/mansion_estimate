@@ -1,4 +1,26 @@
+"""
+# colab
+from google.colab import drive
+drive.mount('/content/drive/')
+
+# LightGBM with GPU
+!git clone --recursive https://github.com/Microsoft/LightGBM
+%cd /content/LightGBM/
+!mkdir build
+!cmake -DUSE_GPU=1 #avoid ..
+!make -j$(nproc)
+!sudo apt-get -y install python-pip
+!sudo -H pip install setuptools pandas numpy scipy scikit-learn -U
+%cd /content/LightGBM/python-package
+!sudo python setup.py install --precompile
+
+%cd "/content/drive/My Drive/data/"
+!pip install category-encoders
+!pip install jeraconv
+!export CUDA_LAUNCH_BLOCKING=1 
+"""
 import argparse
+import copy
 import datetime
 import gc
 import glob
@@ -9,15 +31,24 @@ import random
 import re
 import subprocess
 from pathlib import Path
+from typing import Dict, List
 
 import category_encoders as ce
+import feather
 import lightgbm as lgb
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 from jeraconv import jeraconv
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import MinMaxScaler, RobustScaler
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader, Dataset
+from tqdm.auto import tqdm
 
 # 日付とutil系
 dt_now = datetime.datetime.now()
@@ -25,14 +56,9 @@ dt_now = dt_now.strftime("%Y%m%d_%H:%M")
 gc.enable()
 pd.options.display.max_columns = None
 
-# branch名の取得
-_cmd = "git rev-parse --abbrev-ref HEAD"
-branch = subprocess.check_output(_cmd.split()).strip().decode("utf-8")
-branch = "-".join(branch.split("/"))
-
 # 流石にロガーはglobalを使うぞ
 formatter = "%(levelname)s : %(asctime)s : %(message)s"
-logging.basicConfig(level=logging.DEBUG, format=formatter, filename=f"log/logger_{dt_now}_{branch}.log")
+logging.basicConfig(level=logging.DEBUG, format=formatter, filename=f"log/logger_{dt_now}.log")
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +68,7 @@ def set_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.deterministic = False
 
 
 def get_data():
@@ -79,7 +105,11 @@ def preprocess(train_df, test_df):
         # 駅関係を取得
         df["station"] = df["最寄駅：名称"]
         time_to_station_dict = {"1H30?2H": "105", "1H?1H30": "75", "2H?": "120", "30分?60分": "45"}
-        df["time_to_station"] = df["最寄駅：距離（分）"].map(time_to_station_dict).astype(float)
+        df["最寄駅：距離（分）"] = [x if x != "1H30?2H" else "105" for x in df["最寄駅：距離（分）"]]
+        df["最寄駅：距離（分）"] = [x if x != "1H?1H30" else "75" for x in df["最寄駅：距離（分）"]]
+        df["最寄駅：距離（分）"] = [x if x != "2H?" else "120" for x in df["最寄駅：距離（分）"]]
+        df["最寄駅：距離（分）"] = [x if x != "30分?60分" else "45" for x in df["最寄駅：距離（分）"]]
+        df["time_to_station"] = df["最寄駅：距離（分）"].astype(float)
 
         # 物件情報、間取り
         df["plan"] = df["間取り"]
@@ -91,7 +121,7 @@ def preprocess(train_df, test_df):
         df["plan_D"] = [int("Ｄ" in x) for x in df["間取り"].fillna("")]
         df["plan_K"] = [int("Ｋ" in x) for x in df["間取り"].fillna("")]
         df["plan_R"] = [int("Ｒ" in x) for x in df["間取り"].fillna("")]
-        # df["plan_S"] = [int("S" in x) for x in df["間取り"].fillna("")]
+        df["plan_S"] = [int("S" in x) for x in df["間取り"].fillna("")]
 
         # 物件情報、面積
         df["面積（㎡）"] = [x if x != "2000㎡以上" else "2000" for x in df["面積（㎡）"]]
@@ -105,9 +135,9 @@ def preprocess(train_df, test_df):
 
         # 建物の構造
         df["structure"] = df["建物の構造"]
-        # df["structure_block"] = [int("ブロック造" in x) for x in df["建物の構造"].fillna("")]
+        df["structure_block"] = [int("ブロック造" in x) for x in df["建物の構造"].fillna("")]
         df["structure_wood"] = [int("木造" in x) for x in df["建物の構造"].fillna("")]
-        # df["structure_lightiron"] = [int("軽量鉄骨造" in x) for x in df["建物の構造"].fillna("")]
+        df["structure_lightiron"] = [int("軽量鉄骨造" in x) for x in df["建物の構造"].fillna("")]
         df["structure_iron"] = [int("鉄骨造" in x) for x in df["建物の構造"].fillna("")]
         df["structure_RC"] = [int("ＲＣ" in x) for x in df["建物の構造"].fillna("")]  # SRCも含まれるけどいいのか
         df["structure_SRC"] = [int("ＳＲＣ" in x) for x in df["建物の構造"].fillna("")]
@@ -120,8 +150,8 @@ def preprocess(train_df, test_df):
         df["usage_shop"] = [int("店舗" in x) for x in df["用途"].fillna("")]
         df["usage_parking"] = [int("駐車場" in x) for x in df["用途"].fillna("")]
         df["usage_house"] = [int("住宅" in x) for x in df["用途"].fillna("")]
-        # df["usage_workshop"] = [int("作業場" in x) for x in df["用途"].fillna("")]
-        # df["usage_factory"] = [int("工場" in x) for x in df["用途"].fillna("")]
+        df["usage_workshop"] = [int("作業場" in x) for x in df["用途"].fillna("")]
+        df["usage_factory"] = [int("工場" in x) for x in df["用途"].fillna("")]
 
         # 今後の利用目的、都市計画、建ぺい率、改装
         df["future_usage"] = df["今後の利用目的"]
@@ -138,7 +168,7 @@ def preprocess(train_df, test_df):
         # 取引の事情等
         df["reason"] = df["取引の事情等"]
         df["reason_other"] = [int("その他事情有り" in x) for x in df["取引の事情等"].fillna("")]
-        # df["reason_burden"] = [int("他の権利・負担付き" in x) for x in df["取引の事情等"].fillna("")]
+        df["reason_burden"] = [int("他の権利・負担付き" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_auction"] = [int("調停・競売等" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_defects"] = [int("瑕疵有りの可能性" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_related_parties"] = [int("関係者間取引" in x) for x in df["取引の事情等"].fillna("")]
@@ -147,8 +177,8 @@ def preprocess(train_df, test_df):
         df["floor_area_ratio_x_area"] = df["floor_area_ratio"] * df["area"]
         logger.debug(f"head : {df.head()}")
 
-    # 不要なカラム削除
-    unuse_columns = [
+    # null数
+    original_columns = [
         "都道府県名",
         "市区町村名",
         "地区名",
@@ -167,8 +197,12 @@ def preprocess(train_df, test_df):
         "取引時点",
         "取引の事情等",
     ]
-    train_df = train_df.drop(unuse_columns, axis=1)
-    test_df = test_df.drop(unuse_columns, axis=1)
+    train_df["null_num"] = train_df[original_columns].isnull().sum(axis=1)
+    test_df["null_num"] = test_df[original_columns].isnull().sum(axis=1)
+
+    # 不要なカラム削除
+    train_df = train_df.drop(original_columns, axis=1)
+    test_df = test_df.drop(original_columns, axis=1)
 
     # target encoding
     for col in ["pref", "pref_city", "pref_city_district"]:
@@ -195,6 +229,9 @@ def preprocess(train_df, test_df):
     ce_oe = ce.OrdinalEncoder()
     train_df.loc[:, category_columns] = ce_oe.fit_transform(train_df[category_columns])
     test_df.loc[:, category_columns] = ce_oe.transform(test_df[category_columns])
+    for cat in category_columns:
+        idx = test_df[cat] == -1
+        test_df.loc[idx, cat] = 0
 
     logger.debug(f"train head : {train_df.head()}")
     logger.debug(f"test head : {test_df.head()}")
@@ -216,7 +253,7 @@ class GroupKfoldTrainer(object):
         self.validation_score = []
         self.folds = []
         self.state_path = Path(state_path)
-        self.file_path = self.state_path.joinpath(f"{self.name}_{branch}_{dt_now}.pickle")
+        self.file_path = self.state_path.joinpath(f"{self.name}_{dt_now}.pickle")
         # 無法者なのでここで呼んじゃう
         self.fit()
         self.save()
@@ -269,9 +306,7 @@ class GroupKfoldTrainer(object):
                 # oof, predに対して予測
                 pred_oof = self._predict(model, X_valid)
                 pred_test = self._predict(model, self.test)
-                if type(pred_oof) == torch.Tensor:
-                    pred_oof = pred_oof.cpu().detach().numpy()
-                    pred_test = pred_test.cpu().detach().numpy()
+
                 # 格納
                 self.oof[valid_idx] += pred_oof / self.n_rsb
                 self.pred += pred_test / (self.n_splits * self.n_rsb)
@@ -336,18 +371,294 @@ class LGBTrainer(GroupKfoldTrainer):
         return model.predict(X[self.predictors])
 
 
+class MEDataset(Dataset):
+    def __init__(self, is_train, feature, labels, pref, city, district, station):
+        self.is_train = is_train
+        self.feature = feature
+        self.pref = pref
+        self.city = city
+        self.district = district
+        self.station = station
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.feature)
+
+    def __getitem__(self, idx):
+        features = self.feature[idx]
+        features = torch.Tensor(features)
+        pref = torch.LongTensor([self.pref[idx]])
+        city = torch.LongTensor([self.city[idx]])
+        district = torch.LongTensor([self.district[idx]])
+        station = torch.LongTensor([self.station[idx]])
+        if not self.is_train:
+            return features, pref, city, district, station
+        else:
+            y = self.labels[idx]
+            y = torch.Tensor([y])
+            return features, pref, city, district, station, y
+
+
+class MLPModel(nn.Module):
+    def __init__(self, input_dim):
+        super(MLPModel, self).__init__()
+        pref_dim = 10
+        city_dim = 100
+        district_dim = 1000
+        station_dim = 100
+        dropout_rate = 0.5
+        self.emb_pref = nn.Sequential(
+            nn.Embedding(num_embeddings=48, embedding_dim=pref_dim),
+            # nn.Linear(pref_dim, pref_dim),
+            # nn.PReLU(),
+            # nn.BatchNorm1d(pref_dim),
+            # nn.Dropout(dropout_rate),
+        )
+        self.emb_city = nn.Sequential(
+            nn.Embedding(num_embeddings=619, embedding_dim=city_dim),
+            # nn.Linear(city_dim, city_dim),
+            # nn.PReLU(),
+            # nn.BatchNorm1d(city_dim),
+            # nn.Dropout(dropout_rate),
+        )
+        self.emb_district = nn.Sequential(
+            nn.Embedding(num_embeddings=15419, embedding_dim=district_dim),
+            # nn.Linear(district_dim, district_dim),
+            # nn.PReLU(),
+            # nn.BatchNorm1d(district_dim),
+            # nn.Dropout(dropout_rate),
+        )
+        self.emb_station = nn.Sequential(
+            nn.Embedding(num_embeddings=3833, embedding_dim=station_dim),
+            # nn.Linear(station_dim, station_dim),
+            # nn.PReLU(),
+            # nn.BatchNorm1d(station_dim),
+            # nn.Dropout(dropout_rate),
+        )
+        self.sq1 = nn.Sequential(
+            nn.Linear(pref_dim + city_dim + district_dim + station_dim, 1000),
+            nn.PReLU(),
+            nn.BatchNorm1d(1000),
+            nn.Dropout(dropout_rate),
+            nn.Linear(1000, 100),
+            nn.PReLU(),
+            nn.BatchNorm1d(100),
+            nn.Dropout(dropout_rate),
+        )
+        self.sq2 = nn.Sequential(
+            nn.Linear(input_dim + 100, 1024),
+            nn.BatchNorm1d(1024),
+            nn.Dropout(dropout_rate),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.Dropout(dropout_rate),
+            nn.ReLU(),
+            nn.Linear(512, 1),
+        )
+
+    def forward(self, x, pref, city, district, station):
+        y1 = self.emb_pref(pref.view(-1))
+        y2 = self.emb_city(city.view(-1))
+        y3 = self.emb_district(district.view(-1))
+        y4 = self.emb_station(station.view(-1))
+        y = torch.cat((y1, y2, y3, y4), dim=1)
+        y = self.sq1(y)
+        y = torch.cat((x, y), dim=1)
+        y = self.sq2(y)
+        return y
+
+
+class MLPTrainer(GroupKfoldTrainer):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.categorical_cols = categorical_cols
+        self.numeric_cols = [x for x in predictors if x not in categorical_cols]
+        X, test = self.preprocess(X, test, self.numeric_cols)
+        self.params = params
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+
+    def _get_importance(self, model, importance_type="gain"):
+        importance = pd.DataFrame({"features": [], "importance": []})
+        return importance
+
+    @staticmethod
+    def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
+        # 駅徒歩だけは0埋めしない
+        train_df["time_to_station"] = train_df["time_to_station"].fillna(-1)
+        test_df["time_to_station"] = test_df["time_to_station"].fillna(-1)
+
+        logger.info("scaling...")
+        # transformer = MinMaxScaler()
+        transformer = RobustScaler()
+        train_df[numeric_cols] = transformer.fit_transform(train_df[numeric_cols])
+        test_df[numeric_cols] = transformer.transform(test_df[numeric_cols])
+        # fillna
+        train_df[numeric_cols] = train_df[numeric_cols].fillna(0)
+        test_df[numeric_cols] = test_df[numeric_cols].fillna(0)
+        gc.collect()
+        return train_df, test_df
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        set_seed(loop_seed)
+        # preprocess
+        # DataFrame -> numpy array
+        _X_train = X_train[self.numeric_cols].values.copy()
+        _X_valid = X_valid[self.numeric_cols].values.copy()
+        _Y_train = Y_train.values.copy()
+        _Y_valid = Y_valid.values.copy()
+        _X_train_pref = X_train["pref"].astype(int).values.copy()
+        _X_train_city = X_train["pref_city"].astype(int).values.copy()
+        _X_train_district = X_train["pref_city_district"].astype(int).values.copy()
+        _X_train_station = X_train["station"].astype(int).values.copy()
+        _X_valid_pref = X_valid["pref"].astype(int).values.copy()
+        _X_valid_city = X_valid["pref_city"].astype(int).values.copy()
+        _X_valid_district = X_valid["pref_city_district"].astype(int).values.copy()
+        _X_valid_station = X_valid["station"].astype(int).values.copy()
+
+        # train
+        ret = dict()
+
+        # numpy array -> data loader
+        train_set = MEDataset(
+            is_train=True,
+            feature=_X_train,
+            labels=_Y_train,
+            pref=_X_train_pref,
+            city=_X_train_city,
+            district=_X_train_district,
+            station=_X_train_station,
+        )
+        train_loader = DataLoader(train_set, batch_size=self.params["batch_size"], shuffle=True, num_workers=0)
+        val_set = MEDataset(
+            is_train=True,
+            feature=_X_valid,
+            labels=_Y_valid,
+            pref=_X_valid_pref,
+            city=_X_valid_city,
+            district=_X_valid_district,
+            station=_X_valid_station,
+        )
+        val_loader = DataLoader(val_set, batch_size=10240, num_workers=0)
+
+        # create network, optimizer, scheduler
+        network = MLPModel(_X_train.shape[1])
+        optimizer = Adam(network.parameters(), lr=self.params["lr"])
+        scheduler = ReduceLROnPlateau(
+            optimizer, mode="min", factor=self.params["factor"], patience=self.params["patience"], verbose=True
+        )
+        val_loss_plot = []
+        # begin training...
+        torch.backends.cudnn.benchmark = True
+        self.criterion = nn.L1Loss()
+        best_score = 100000
+        for epoch in range(self.params["n_epoch"]):
+            # train model...
+            for train_batch in train_loader:
+                x, pref, city, district, station, label = train_batch
+                x = x.to(self.device)
+                pref = pref.to(self.device)
+                city = city.to(self.device)
+                district = district.to(self.device)
+                station = station.to(self.device)
+                label = label.to(self.device)
+
+                network.train()
+                network = network.to(self.device)
+                train_preds = network.forward(x, pref, city, district, station)
+                train_loss = self.criterion(train_preds, label)
+                optimizer.zero_grad()
+                train_loss.backward()
+                optimizer.step()
+
+            # get validation score...
+            network.eval()
+            val_preds, val_targs = [], []
+            for val_batch in val_loader:
+                x, pref, city, district, station, label = val_batch
+                with torch.no_grad():
+                    x = x.to(self.device)
+                    pref = pref.to(self.device)
+                    city = city.to(self.device)
+                    district = district.to(self.device)
+                    station = station.to(self.device)
+                    label = label.to(self.device)
+                    network = network.to(self.device)
+
+                    val_preds.append(network.forward(x, pref, city, district, station))
+                    val_targs.append(label)
+            val_preds = torch.cat(val_preds, axis=0)
+            val_targs = torch.cat(val_targs, axis=0)
+            val_loss = self.criterion(val_preds, val_targs).cpu().detach().numpy()
+            scheduler.step(val_loss)
+            print(f"epoch {epoch:0>4}: val_loss {val_loss}")
+            val_loss_plot.append(float(val_loss))
+
+            # モデルを保存
+            if val_loss < best_score:
+                # モデルそのものを保存すると参照渡しになるので、わざわざ重みをコピーしてあとで入れるみたいなことをしている。
+                best_model_wts = copy.deepcopy(network.state_dict())
+                best_score = val_loss
+                print(f"model updated. best score is {best_score}")
+        print("\n")
+        logger.debug(f"NN result: {val_loss_plot}")
+
+        # 一番良いところを持ってくる
+        network.load_state_dict(best_model_wts)
+        ret["model"] = network
+        return ret
+
+    def _predict(self, model, X):
+        model.eval()
+        with torch.no_grad():
+            model = model.to(self.device)
+            _X = torch.Tensor(X[self.numeric_cols].values).to(self.device)
+            pref = torch.LongTensor(X["pref"].astype(int).values).to(self.device)
+            city = torch.LongTensor(X["pref_city"].astype(int).values).to(self.device)
+            district = torch.LongTensor(X["pref_city_district"].astype(int).values).to(self.device)
+            station = torch.LongTensor(X["station"].astype(int).values).to(self.device)
+            preds = model.forward(_X, pref, city, district, station).view(-1)
+            preds = preds.to("cpu").detach().numpy().copy()
+        return preds
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug")
+    parser.add_argument("--update_dm")
     args = parser.parse_args()
     debug = args.debug
+    update_dm = args.update_dm
+    if update_dm is None:
+        update_dm = False
+    else:
+        update_dm = True
+    if debug is None:
+        debug = False
+    else:
+        debug = True
     logger.info(f"debug mode {debug}")
+    logger.info(f"update dm  {update_dm}")
 
-    logger.info("loading data")
-    train_df, test_df, sample_submission = get_data()
-
-    logger.info("preprocessing data")
-    train_df, test_df = preprocess(train_df, test_df)
+    train_df_path = "./data/processed/train_df.feather"
+    test_df_path = "./data/processed/test_df.feather"
+    if debug:
+        logger.info("loading data")
+        train_df, test_df, sample_submission = get_data()
+        logger.info("preprocessing data")
+        train_df, test_df = preprocess(train_df, test_df)
+    else:
+        if (not os.path.exists(train_df_path)) | update_dm:
+            logger.info("loading data")
+            train_df, test_df, sample_submission = get_data()
+            logger.info("preprocessing data")
+            train_df, test_df = preprocess(train_df, test_df)
+            feather.write_dataframe(train_df, train_df_path)
+            feather.write_dataframe(test_df, test_df_path)
+        else:
+            train_df = feather.read_dataframe(train_df_path)
+            test_df = feather.read_dataframe(test_df_path)
+            sample_submission = pd.read_csv("./data/raw/sample_submission.csv")
 
     logger.info("training data")
     predictors = [
@@ -355,7 +666,7 @@ if __name__ == "__main__":
         for x in train_df.columns
         if x not in ["ID", "y", "base_year", "floor_area_ratio", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
-    logger.debug(f"predictors: {predictors}")
+    logger.debug(f"LGBM predictors: {predictors}")
     if debug:
         n_splits = 2
         n_rsb = 1
@@ -367,6 +678,8 @@ if __name__ == "__main__":
         "boosting_type": "gbdt",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
+        "device": "cpu",
+        # "max_bin": 240,
         "verbosity": -1,
     }
     lgb_booster = LGBTrainer(
@@ -379,9 +692,30 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district", "remodeling"],
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
-
+    predictors = [
+        x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
+    ]
+    logger.debug(f"nn predictors: {predictors}")
+    if debug:
+        n_splits = 2
+        n_rsb = 1
+    else:
+        n_splits = 6
+        n_rsb = 1
+    mlp_trainer = MLPTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params={"n_epoch": 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+    )
     # submit
-    sample_submission["取引価格（総額）_log"] = lgb_booster.pred
+    sample_submission["取引価格（総額）_log"] = mlp_trainer.pred
     sample_submission.to_csv("./submit.csv", index=False)
