@@ -585,8 +585,12 @@ if __name__ == "__main__":
     update_dm = args.update_dm
     if update_dm is None:
         update_dm = False
+    else:
+        update_dm = True
     if debug is None:
         debug = False
+    else:
+        debug = True
     logger.info(f"debug mode {debug}")
     logger.info(f"update dm  {update_dm}")
 
