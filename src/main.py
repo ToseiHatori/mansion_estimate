@@ -93,7 +93,11 @@ def preprocess(train_df, test_df):
         # 駅関係を取得
         df["station"] = df["最寄駅：名称"]
         time_to_station_dict = {"1H30?2H": "105", "1H?1H30": "75", "2H?": "120", "30分?60分": "45"}
-        df["time_to_station"] = df["最寄駅：距離（分）"].map(time_to_station_dict).astype(float)
+        df["最寄駅：距離（分）"] = [x if x != "1H30?2H" else "105" for x in df["最寄駅：距離（分）"]]
+        df["最寄駅：距離（分）"] = [x if x != "1H?1H30" else "75" for x in df["最寄駅：距離（分）"]]
+        df["最寄駅：距離（分）"] = [x if x != "2H?" else "120" for x in df["最寄駅：距離（分）"]]
+        df["最寄駅：距離（分）"] = [x if x != "30分?60分" else "45" for x in df["最寄駅：距離（分）"]]
+        df["time_to_station"] = df["最寄駅：距離（分）"].astype(float)
 
         # 物件情報、間取り
         df["plan"] = df["間取り"]
@@ -105,7 +109,7 @@ def preprocess(train_df, test_df):
         df["plan_D"] = [int("Ｄ" in x) for x in df["間取り"].fillna("")]
         df["plan_K"] = [int("Ｋ" in x) for x in df["間取り"].fillna("")]
         df["plan_R"] = [int("Ｒ" in x) for x in df["間取り"].fillna("")]
-        # df["plan_S"] = [int("S" in x) for x in df["間取り"].fillna("")]
+        df["plan_S"] = [int("S" in x) for x in df["間取り"].fillna("")]
 
         # 物件情報、面積
         df["面積（㎡）"] = [x if x != "2000㎡以上" else "2000" for x in df["面積（㎡）"]]
@@ -119,9 +123,9 @@ def preprocess(train_df, test_df):
 
         # 建物の構造
         df["structure"] = df["建物の構造"]
-        # df["structure_block"] = [int("ブロック造" in x) for x in df["建物の構造"].fillna("")]
+        df["structure_block"] = [int("ブロック造" in x) for x in df["建物の構造"].fillna("")]
         df["structure_wood"] = [int("木造" in x) for x in df["建物の構造"].fillna("")]
-        # df["structure_lightiron"] = [int("軽量鉄骨造" in x) for x in df["建物の構造"].fillna("")]
+        df["structure_lightiron"] = [int("軽量鉄骨造" in x) for x in df["建物の構造"].fillna("")]
         df["structure_iron"] = [int("鉄骨造" in x) for x in df["建物の構造"].fillna("")]
         df["structure_RC"] = [int("ＲＣ" in x) for x in df["建物の構造"].fillna("")]  # SRCも含まれるけどいいのか
         df["structure_SRC"] = [int("ＳＲＣ" in x) for x in df["建物の構造"].fillna("")]
@@ -134,8 +138,8 @@ def preprocess(train_df, test_df):
         df["usage_shop"] = [int("店舗" in x) for x in df["用途"].fillna("")]
         df["usage_parking"] = [int("駐車場" in x) for x in df["用途"].fillna("")]
         df["usage_house"] = [int("住宅" in x) for x in df["用途"].fillna("")]
-        # df["usage_workshop"] = [int("作業場" in x) for x in df["用途"].fillna("")]
-        # df["usage_factory"] = [int("工場" in x) for x in df["用途"].fillna("")]
+        df["usage_workshop"] = [int("作業場" in x) for x in df["用途"].fillna("")]
+        df["usage_factory"] = [int("工場" in x) for x in df["用途"].fillna("")]
 
         # 今後の利用目的、都市計画、建ぺい率、改装
         df["future_usage"] = df["今後の利用目的"]
@@ -152,7 +156,7 @@ def preprocess(train_df, test_df):
         # 取引の事情等
         df["reason"] = df["取引の事情等"]
         df["reason_other"] = [int("その他事情有り" in x) for x in df["取引の事情等"].fillna("")]
-        # df["reason_burden"] = [int("他の権利・負担付き" in x) for x in df["取引の事情等"].fillna("")]
+        df["reason_burden"] = [int("他の権利・負担付き" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_auction"] = [int("調停・競売等" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_defects"] = [int("瑕疵有りの可能性" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_related_parties"] = [int("関係者間取引" in x) for x in df["取引の事情等"].fillna("")]
