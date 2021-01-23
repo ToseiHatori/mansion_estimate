@@ -394,6 +394,7 @@ class MLPModel(nn.Module):
         city_dim = 100
         district_dim = 1000
         station_dim = 100
+        dropout_rate = 0.5
         self.emb_pref = nn.Sequential(
             nn.Embedding(num_embeddings=48, embedding_dim=pref_dim),
             # nn.Linear(pref_dim, pref_dim),
@@ -423,22 +424,25 @@ class MLPModel(nn.Module):
             # nn.Dropout(0.5),
         )
         self.sq1 = nn.Sequential(
-            nn.Linear(pref_dim + city_dim + district_dim + station_dim, 100),
-            # nn.Linear(1024, 1024),
-            # nn.PReLU(),
-            # nn.BatchNorm1d(1024),
-            # nn.Dropout(0.5),
+            nn.Linear(pref_dim + city_dim + district_dim + station_dim, 1000),
+            nn.PReLU(),
+            nn.BatchNorm1d(1000),
+            nn.Dropout(dropout_rate),
+            nn.Linear(1000, 100),
+            nn.PReLU(),
+            nn.BatchNorm1d(100),
+            nn.Dropout(dropout_rate),
         )
         self.sq2 = nn.Sequential(
-            nn.Linear(input_dim + 100, 512),
+            nn.Linear(input_dim + 100, 1024),
+            nn.BatchNorm1d(1024),
+            nn.Dropout(dropout_rate),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
             nn.BatchNorm1d(512),
-            nn.Dropout(0.5),
+            nn.Dropout(dropout_rate),
             nn.ReLU(),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.Dropout(0.5),
-            nn.ReLU(),
-            nn.Linear(256, 1),
+            nn.Linear(512, 1),
         )
 
     def forward(self, x, pref, city, district, station):
@@ -695,7 +699,7 @@ if __name__ == "__main__":
         test=test_df,
         n_splits=n_splits,
         n_rsb=n_rsb,
-        params={"n_epoch": 100, "lr": 1e-3, "batch_size": 1024, "patience": 10, "factor": 0.1},
+        params={"n_epoch": 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     # submit
