@@ -2,6 +2,18 @@
 # colab
 from google.colab import drive
 drive.mount('/content/drive/')
+
+# LightGBM with GPU
+!git clone --recursive https://github.com/Microsoft/LightGBM
+%cd /content/LightGBM/
+!mkdir build
+!cmake -DUSE_GPU=1 #avoid ..
+!make -j$(nproc)
+!sudo apt-get -y install python-pip
+!sudo -H pip install setuptools pandas numpy scipy scikit-learn -U
+%cd /content/LightGBM/python-package
+!sudo python setup.py install --precompile
+
 %cd "/content/drive/My Drive/data/"
 !pip install category-encoders
 !pip install jeraconv
@@ -667,6 +679,7 @@ if __name__ == "__main__":
         "subsample": 0.8,
         "colsample_bytree": 0.8,
         "device": [("gpu" if torch.cuda.is_available() else "cpu")][0],
+        "max_bin": 100,
         "verbosity": -1,
     }
     lgb_booster = LGBTrainer(
@@ -679,7 +692,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district", "remodeling"],
+        categorical_cols=[],
     )
     predictors = [
         x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
