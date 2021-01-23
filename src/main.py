@@ -209,6 +209,9 @@ def preprocess(train_df, test_df):
     ce_oe = ce.OrdinalEncoder()
     train_df.loc[:, category_columns] = ce_oe.fit_transform(train_df[category_columns])
     test_df.loc[:, category_columns] = ce_oe.transform(test_df[category_columns])
+    for cat in category_columns:
+        idx = test_df[cat] == -1
+        test_df.loc[idx, cat] = 0
 
     logger.debug(f"train head : {train_df.head()}")
     logger.debug(f"test head : {test_df.head()}")
@@ -283,9 +286,7 @@ class GroupKfoldTrainer(object):
                 # oof, predに対して予測
                 pred_oof = self._predict(model, X_valid)
                 pred_test = self._predict(model, self.test)
-                if type(pred_oof) == torch.Tensor:
-                    pred_oof = pred_oof.cpu().detach().numpy()
-                    pred_test = pred_test.cpu().detach().numpy()
+
                 # 格納
                 self.oof[valid_idx] += pred_oof / self.n_rsb
                 self.pred += pred_test / (self.n_splits * self.n_rsb)
@@ -508,7 +509,7 @@ class MLPTrainer(GroupKfoldTrainer):
         torch.backends.cudnn.benchmark = True
         self.criterion = nn.L1Loss()
         best_score = 1000
-        for epoch in range(100):
+        for epoch in range(1):
             # train model...
             for train_batch in train_loader:
                 x, pref, city, district, label = train_batch
@@ -563,12 +564,15 @@ class MLPTrainer(GroupKfoldTrainer):
         return ret
 
     def _predict(self, model, X):
-        _X_valid = torch.Tensor(X[self.numeric_cols].values).to(self.device)
-        pref = torch.LongTensor(X["pref"].astype(int).values).to(self.device)
-        city = torch.LongTensor(X["pref_city"].astype(int).values).to(self.device)
-        district = torch.LongTensor(X["pref_city_district"].astype(int).values).to(self.device)
-        preds = model.forward(_X_valid, pref, city, district)
-        preds = preds.cpu().detach().numpy().reshape(-1)
+        model.eval()
+        with torch.no_grad():
+            model = model.to(self.device)
+            _X = torch.Tensor(X[self.numeric_cols].values).to(self.device)
+            pref = torch.LongTensor(X["pref"].astype(int).values).to(self.device)
+            city = torch.LongTensor(X["pref_city"].astype(int).values).to(self.device)
+            district = torch.LongTensor(X["pref_city_district"].astype(int).values).to(self.device)
+            preds = model.forward(_X, pref, city, district).view(-1)
+            preds = preds.to("cpu").detach().numpy().copy()
         return preds
 
 
@@ -588,30 +592,36 @@ if __name__ == "__main__":
 
     train_df_path = "./data/processed/train_df.feather"
     test_df_path = "./data/processed/test_df.feather"
-    if (not os.path.exists(train_df_path)) | update_dm:
+    if debug:
         logger.info("loading data")
         train_df, test_df, sample_submission = get_data()
         logger.info("preprocessing data")
         train_df, test_df = preprocess(train_df, test_df)
-        feather.write_dataframe(train_df, train_df_path)
-        feather.write_dataframe(test_df, test_df_path)
     else:
-        train_df = feather.read_dataframe(train_df_path)
-        test_df = feather.read_dataframe(test_df_path)
+        if (not os.path.exists(train_df_path)) | update_dm:
+            logger.info("loading data")
+            train_df, test_df, sample_submission = get_data()
+            logger.info("preprocessing data")
+            train_df, test_df = preprocess(train_df, test_df)
+            feather.write_dataframe(train_df, train_df_path)
+            feather.write_dataframe(test_df, test_df_path)
+        else:
+            train_df = feather.read_dataframe(train_df_path)
+            test_df = feather.read_dataframe(test_df_path)
 
-    logger.info("training data")
-    predictors = [
-        x
-        for x in train_df.columns
-        if x not in ["ID", "y", "base_year", "floor_area_ratio", "te_pref", "te_pref_city", "te_pref_city_district"]
-    ]
-    logger.debug(f"predictors: {predictors}")
-    if debug:
-        n_splits = 2
-        n_rsb = 1
-    else:
-        n_splits = 6
-        n_rsb = 5
+    # logger.info("training data")
+    # predictors = [
+    #    x
+    #    for x in train_df.columns
+    #    if x not in ["ID", "y", "base_year", "floor_area_ratio", "te_pref", "te_pref_city", "te_pref_city_district"]
+    # ]
+    # logger.debug(f"LGBM predictors: {predictors}")
+    # if debug:
+    #    n_splits = 2
+    #    n_rsb = 1
+    # else:
+    #    n_splits = 6
+    #    n_rsb = 5
     # params = {
     #    "objective": "mae",
     #    "boosting_type": "gbdt",
@@ -634,6 +644,7 @@ if __name__ == "__main__":
     predictors = [
         x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
+    logger.debug(f"nn predictors: {predictors}")
     if debug:
         n_splits = 2
         n_rsb = 1
