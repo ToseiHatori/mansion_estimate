@@ -400,28 +400,28 @@ class MLPModel(nn.Module):
             # nn.Linear(pref_dim, pref_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(pref_dim),
-            # nn.Dropout(0.5),
+            # nn.Dropout(dropout_rate),
         )
         self.emb_city = nn.Sequential(
             nn.Embedding(num_embeddings=619, embedding_dim=city_dim),
             # nn.Linear(city_dim, city_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(city_dim),
-            # nn.Dropout(0.5),
+            # nn.Dropout(dropout_rate),
         )
         self.emb_district = nn.Sequential(
             nn.Embedding(num_embeddings=15419, embedding_dim=district_dim),
             # nn.Linear(district_dim, district_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(district_dim),
-            # nn.Dropout(0.5),
+            # nn.Dropout(dropout_rate),
         )
         self.emb_station = nn.Sequential(
             nn.Embedding(num_embeddings=3833, embedding_dim=station_dim),
             # nn.Linear(station_dim, station_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(station_dim),
-            # nn.Dropout(0.5),
+            # nn.Dropout(dropout_rate),
         )
         self.sq1 = nn.Sequential(
             nn.Linear(pref_dim + city_dim + district_dim + station_dim, 1000),
@@ -648,38 +648,39 @@ if __name__ == "__main__":
             test_df = feather.read_dataframe(test_df_path)
             sample_submission = pd.read_csv("./data/raw/sample_submission.csv")
 
-    # logger.info("training data")
-    # predictors = [
-    #    x
-    #    for x in train_df.columns
-    #    if x not in ["ID", "y", "base_year", "floor_area_ratio", "te_pref", "te_pref_city", "te_pref_city_district"]
-    # ]
-    # logger.debug(f"LGBM predictors: {predictors}")
-    # if debug:
-    #    n_splits = 2
-    #    n_rsb = 1
-    # else:
-    #    n_splits = 6
-    #    n_rsb = 5
-    # params = {
-    #    "objective": "mae",
-    #    "boosting_type": "gbdt",
-    #    "subsample": 0.8,
-    #    "colsample_bytree": 0.8,
-    #    "verbosity": -1,
-    # }
-    # lgb_booster = LGBTrainer(
-    #    state_path="./models",
-    #    predictors=predictors,
-    #    target_col="y",
-    #    X=train_df,
-    #    groups=train_df["base_year"],
-    #    test=test_df,
-    #    n_splits=n_splits,
-    #    n_rsb=n_rsb,
-    #    params=params,
-    #    categorical_cols=["pref", "pref_city", "pref_city_district", "remodeling"],
-    # )
+    logger.info("training data")
+    predictors = [
+        x
+        for x in train_df.columns
+        if x not in ["ID", "y", "base_year", "floor_area_ratio", "te_pref", "te_pref_city", "te_pref_city_district"]
+    ]
+    logger.debug(f"LGBM predictors: {predictors}")
+    if debug:
+        n_splits = 2
+        n_rsb = 1
+    else:
+        n_splits = 6
+        n_rsb = 5
+    params = {
+        "objective": "mae",
+        "boosting_type": "gbdt",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "device": torch.device("gpu" if torch.cuda.is_available() else "cpu")
+        "verbosity": -1,
+    }
+    lgb_booster = LGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params=params,
+        categorical_cols=["pref", "pref_city", "pref_city_district", "remodeling"],
+    )
     predictors = [
         x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
