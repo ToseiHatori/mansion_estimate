@@ -49,6 +49,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
+import xgboost as xgb
 
 # 日付とutil系
 dt_now = datetime.datetime.now()
@@ -485,17 +486,14 @@ class MLPTrainer(GroupKfoldTrainer):
     @staticmethod
     def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
         # 駅徒歩だけは0埋めしない
-        train_df["time_to_station"] = train_df["time_to_station"].fillna(-1)
-        test_df["time_to_station"] = test_df["time_to_station"].fillna(-1)
+        train_df[numeric_cols] = train_df[numeric_cols].fillna(-1)
+        test_df[numeric_cols] = test_df[numeric_cols].fillna(-1)
 
         logger.info("scaling...")
         # transformer = MinMaxScaler()
         transformer = RobustScaler()
         train_df[numeric_cols] = transformer.fit_transform(train_df[numeric_cols])
         test_df[numeric_cols] = transformer.transform(test_df[numeric_cols])
-        # fillna
-        train_df[numeric_cols] = train_df[numeric_cols].fillna(0)
-        test_df[numeric_cols] = test_df[numeric_cols].fillna(0)
         gc.collect()
         return train_df, test_df
 
@@ -622,6 +620,50 @@ class MLPTrainer(GroupKfoldTrainer):
         return preds
 
 
+class XGBTrainer(GroupKfoldTrainer):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params):
+        self.params = params
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+
+    def _get_importance(self, model):
+        imp_dict = model.get_fscore()
+        # fill default columns
+        for col in self.predictors:
+            if col not in imp_dict.keys():
+                imp_dict[col] = 0
+
+        # to dataframe
+        importance = pd.DataFrame.from_dict(imp_dict, orient="index", columns=["importance"])
+        importance["features"] = importance.index
+        importance = importance[["features", "importance"]].reset_index(drop=True)
+        return importance
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        set_seed(loop_seed)
+        self.params["seed"] = loop_seed
+        logger.debug(f"XGB params: {self.params}")
+
+        dtrain = xgb.DMatrix(X_train, label=Y_train, feature_names=self.predictors)
+        dvalid = xgb.DMatrix(X_valid, label=Y_valid, feature_names=self.predictors)
+        model = xgb.train(
+            self.params,
+            dtrain,
+            evals=[(dtrain, "train"), (dvalid, "valid")],
+            num_boost_round=100000,
+            early_stopping_rounds=100,
+            verbose_eval=100,
+        )
+        ret = {}
+        ret["model"] = model
+        ret["importance"] = self._get_importance(model)
+        logger.debug(f'importance: {ret["importance"]}')
+        return ret
+
+    def _predict(self, model, X):
+        dtest = xgb.DMatrix(X[self.predictors], feature_names=self.predictors)
+        return model.predict(dtest, ntree_limit=model.best_ntree_limit)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug")
@@ -660,13 +702,72 @@ if __name__ == "__main__":
             test_df = feather.read_dataframe(test_df_path)
             sample_submission = pd.read_csv("./data/raw/sample_submission.csv")
 
-    logger.info("training data")
+    # logger.info("TRAIN LightGBM")
+    # predictors = [
+    #    x
+    #    for x in train_df.columns
+    #    if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
+    # ]
+    # logger.debug(f"LGBM predictors: {predictors}")
+    # if debug:
+    #    n_splits = 2
+    #    n_rsb = 1
+    # else:
+    #    n_splits = 6
+    #    n_rsb = 5
+    # params = {
+    #    "objective": "mae",
+    #    "boosting_type": "gbdt",
+    #    "subsample": 0.8,
+    #    "colsample_bytree": 0.8,
+    #    "device": "cpu",
+    #    # "max_bin": 240,
+    #    "verbosity": -1,
+    # }
+    # lgb_trainer = LGBTrainer(
+    #    state_path="./models",
+    #    predictors=predictors,
+    #    target_col="y",
+    #    X=train_df,
+    #    groups=train_df["base_year"],
+    #    test=test_df,
+    #    n_splits=n_splits,
+    #    n_rsb=n_rsb,
+    #    params=params,
+    #    categorical_cols=["pref", "pref_city", "pref_city_district"],
+    # )
+
+    # logger.info("TRAIN NN")
+    # predictors = [
+    #    x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
+    # ]
+    # logger.debug(f"nn predictors: {predictors}")
+    # if debug:
+    #    n_splits = 2
+    #    n_rsb = 1
+    # else:
+    #    n_splits = 6
+    #    n_rsb = 1
+    # mlp_trainer = MLPTrainer(
+    #    state_path="./models",
+    #    predictors=predictors,
+    #    target_col="y",
+    #    X=train_df,
+    #    groups=train_df["base_year"],
+    #    test=test_df,
+    #    n_splits=n_splits,
+    #    n_rsb=n_rsb,
+    #    params={"n_epoch": 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+    #    categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+    # )
+
+    logger.info("TRAIN XGBoost")
     predictors = [
         x
         for x in train_df.columns
-        if x not in ["ID", "y", "base_year", "floor_area_ratio", "te_pref", "te_pref_city", "te_pref_city_district"]
+        if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
-    logger.debug(f"LGBM predictors: {predictors}")
+    logger.debug(f"XGB predictors: {predictors}")
     if debug:
         n_splits = 2
         n_rsb = 1
@@ -674,15 +775,13 @@ if __name__ == "__main__":
         n_splits = 6
         n_rsb = 5
     params = {
-        "objective": "mae",
-        "boosting_type": "gbdt",
+        "objective": "reg:squarederror",
+        "eval_metric": "mae",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "device": "cpu",
-        # "max_bin": 240,
-        "verbosity": -1,
+        # "tree_method": "gpu_hist",
     }
-    lgb_booster = LGBTrainer(
+    xgb_trainer = XGBTrainer(
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -692,30 +791,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
-    )
-    predictors = [
-        x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
-    ]
-    logger.debug(f"nn predictors: {predictors}")
-    if debug:
-        n_splits = 2
-        n_rsb = 1
-    else:
-        n_splits = 6
-        n_rsb = 1
-    mlp_trainer = MLPTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        params={"n_epoch": 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
-        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     # submit
-    sample_submission["取引価格（総額）_log"] = mlp_trainer.pred
+    sample_submission["取引価格（総額）_log"] = xgb_trainer.pred
     sample_submission.to_csv("./submit.csv", index=False)
