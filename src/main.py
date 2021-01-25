@@ -3,20 +3,10 @@
 from google.colab import drive
 drive.mount('/content/drive/')
 
-# LightGBM with GPU
-!git clone --recursive https://github.com/Microsoft/LightGBM
-%cd /content/LightGBM/
-!mkdir build
-!cmake -DUSE_GPU=1 #avoid ..
-!make -j$(nproc)
-!sudo apt-get -y install python-pip
-!sudo -H pip install setuptools pandas numpy scipy scikit-learn -U
-%cd /content/LightGBM/python-package
-!sudo python setup.py install --precompile
-
 %cd "/content/drive/My Drive/data/"
 !pip install category-encoders
 !pip install jeraconv
+!pip install catboost
 !export CUDA_LAUNCH_BLOCKING=1 
 """
 import argparse
@@ -488,7 +478,7 @@ class MLPTrainer(GroupKfoldTrainer):
 
     @staticmethod
     def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
-        # 駅徒歩だけは0埋めしない
+        # -1埋め
         train_df[numeric_cols] = train_df[numeric_cols].fillna(-1)
         test_df[numeric_cols] = test_df[numeric_cols].fillna(-1)
 
@@ -848,7 +838,8 @@ if __name__ == "__main__":
         "verbose_eval": 100,
         "nan_mode": "Min",
         "bootstrap_type": "Bernoulli",
-        # "task_type": "GPU",
+        "task_type": "GPU",
+        "learning_rate": 0.1,
     }
     cbt_trainer = CBTTrainer(
         state_path="./models",
