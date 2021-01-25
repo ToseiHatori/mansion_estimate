@@ -3,20 +3,10 @@
 from google.colab import drive
 drive.mount('/content/drive/')
 
-# LightGBM with GPU
-!git clone --recursive https://github.com/Microsoft/LightGBM
-%cd /content/LightGBM/
-!mkdir build
-!cmake -DUSE_GPU=1 #avoid ..
-!make -j$(nproc)
-!sudo apt-get -y install python-pip
-!sudo -H pip install setuptools pandas numpy scipy scikit-learn -U
-%cd /content/LightGBM/python-package
-!sudo python setup.py install --precompile
-
 %cd "/content/drive/My Drive/data/"
 !pip install category-encoders
 !pip install jeraconv
+!pip install catboost
 !export CUDA_LAUNCH_BLOCKING=1 
 """
 import argparse
@@ -41,6 +31,8 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import xgboost as xgb
+from catboost import CatBoost, Pool
 from jeraconv import jeraconv
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold
@@ -49,7 +41,6 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
-import xgboost as xgb
 
 # 日付とutil系
 dt_now = datetime.datetime.now()
@@ -233,6 +224,8 @@ def preprocess(train_df, test_df):
     for cat in category_columns:
         idx = test_df[cat] == -1
         test_df.loc[idx, cat] = 0
+    train_df[category_columns] = train_df[category_columns].astype(int)
+    test_df[category_columns] = test_df[category_columns].astype(int)
 
     logger.debug(f"train head : {train_df.head()}")
     logger.debug(f"test head : {test_df.head()}")
@@ -485,7 +478,7 @@ class MLPTrainer(GroupKfoldTrainer):
 
     @staticmethod
     def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
-        # 駅徒歩だけは0埋めしない
+        # -1埋め
         train_df[numeric_cols] = train_df[numeric_cols].fillna(-1)
         test_df[numeric_cols] = test_df[numeric_cols].fillna(-1)
 
@@ -664,6 +657,38 @@ class XGBTrainer(GroupKfoldTrainer):
         return model.predict(dtest, ntree_limit=model.best_ntree_limit)
 
 
+class CBTTrainer(GroupKfoldTrainer):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
+        self.params = params
+        self.categorical_cols = categorical_cols
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+
+    def _get_importance(self, model, dtrain):
+        imp = model.get_feature_importance(dtrain, type="FeatureImportance")
+        importance = pd.DataFrame({"features": self.predictors, "importance": imp})
+        return importance
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        set_seed(loop_seed)
+        self.params["random_seed"] = loop_seed
+        logger.debug(f"CBT params: {self.params}")
+
+        dtrain = Pool(X_train, label=Y_train, cat_features=self.categorical_cols, feature_names=self.predictors)
+        dvalid = Pool(X_valid, label=Y_valid, cat_features=self.categorical_cols, feature_names=self.predictors)
+        model = CatBoost(params)
+        model.fit(dtrain, eval_set=dvalid, use_best_model=True, plot=False)
+        ret = {}
+        ret["model"] = model
+        ret["importance"] = self._get_importance(model, dtrain)
+        logger.debug(f'importance: {ret["importance"]}')
+        return ret
+
+    def _predict(self, model, X):
+        dtest = Pool(X[self.predictors], cat_features=self.categorical_cols, feature_names=self.predictors)
+        pred = model.predict(dtest, prediction_type="RawFormulaVal")
+        return pred
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug")
@@ -702,86 +727,121 @@ if __name__ == "__main__":
             test_df = feather.read_dataframe(test_df_path)
             sample_submission = pd.read_csv("./data/raw/sample_submission.csv")
 
-    # logger.info("TRAIN LightGBM")
-    # predictors = [
-    #    x
-    #    for x in train_df.columns
-    #    if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
-    # ]
-    # logger.debug(f"LGBM predictors: {predictors}")
-    # if debug:
-    #    n_splits = 2
-    #    n_rsb = 1
-    # else:
-    #    n_splits = 6
-    #    n_rsb = 5
-    # params = {
-    #    "objective": "mae",
-    #    "boosting_type": "gbdt",
-    #    "subsample": 0.8,
-    #    "colsample_bytree": 0.8,
-    #    "device": "cpu",
-    #    # "max_bin": 240,
-    #    "verbosity": -1,
-    # }
-    # lgb_trainer = LGBTrainer(
-    #    state_path="./models",
-    #    predictors=predictors,
-    #    target_col="y",
-    #    X=train_df,
-    #    groups=train_df["base_year"],
-    #    test=test_df,
-    #    n_splits=n_splits,
-    #    n_rsb=n_rsb,
-    #    params=params,
-    #    categorical_cols=["pref", "pref_city", "pref_city_district"],
-    # )
+        # logger.info("TRAIN LightGBM")
+        # predictors = [
+        #    x
+        #    for x in train_df.columns
+        #    if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
+        # ]
+        # logger.debug(f"LGBM predictors: {predictors}")
+        # if debug:
+        #    n_splits = 2
+        #    n_rsb = 1
+        # else:
+        #    n_splits = 6
+        #    n_rsb = 5
+        # params = {
+        #    "objective": "mae",
+        #    "boosting_type": "gbdt",
+        #    "subsample": 0.8,
+        #    "colsample_bytree": 0.8,
+        #    "device": "cpu",
+        #    # "max_bin": 240,
+        #    "verbosity": -1,
+        # }
+        # lgb_trainer = LGBTrainer(
+        #    state_path="./models",
+        #    predictors=predictors,
+        #    target_col="y",
+        #    X=train_df,
+        #    groups=train_df["base_year"],
+        #    test=test_df,
+        #    n_splits=n_splits,
+        #    n_rsb=n_rsb,
+        #    params=params,
+        #    categorical_cols=["pref", "pref_city", "pref_city_district"],
+        # )
 
-    # logger.info("TRAIN NN")
-    # predictors = [
-    #    x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
-    # ]
-    # logger.debug(f"nn predictors: {predictors}")
-    # if debug:
-    #    n_splits = 2
-    #    n_rsb = 1
-    # else:
-    #    n_splits = 6
-    #    n_rsb = 1
-    # mlp_trainer = MLPTrainer(
-    #    state_path="./models",
-    #    predictors=predictors,
-    #    target_col="y",
-    #    X=train_df,
-    #    groups=train_df["base_year"],
-    #    test=test_df,
-    #    n_splits=n_splits,
-    #    n_rsb=n_rsb,
-    #    params={"n_epoch": 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
-    #    categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-    # )
+        # logger.info("TRAIN NN")
+        # predictors = [
+        #    x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
+        # ]
+        # logger.debug(f"nn predictors: {predictors}")
+        # if debug:
+        #    n_splits = 2
+        #    n_rsb = 1
+        # else:
+        #    n_splits = 6
+        #    n_rsb = 1
+        # mlp_trainer = MLPTrainer(
+        #    state_path="./models",
+        #    predictors=predictors,
+        #    target_col="y",
+        #    X=train_df,
+        #    groups=train_df["base_year"],
+        #    test=test_df,
+        #    n_splits=n_splits,
+        #    n_rsb=n_rsb,
+        #    params={"n_epoch": 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+        #    categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+        # )
 
-    logger.info("TRAIN XGBoost")
+        # logger.info("TRAIN XGBoost")
+        # predictors = [
+        #    x
+        #    for x in train_df.columns
+        #    if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
+        # ]
+        # logger.debug(f"XGB predictors: {predictors}")
+        # if debug:
+        #    n_splits = 2
+        #    n_rsb = 1
+        # else:
+        #    n_splits = 6
+        #    n_rsb = 5
+        # params = {
+        #    "objective": "reg:squarederror",
+        #    "eval_metric": "mae",
+        #    "subsample": 0.8,
+        #    "colsample_bytree": 0.8,
+        #    "tree_method": "gpu_hist",
+        # }
+        # xgb_trainer = XGBTrainer(
+        #    state_path="./models",
+        #    predictors=predictors,
+        #    target_col="y",
+        #    X=train_df,
+        #    groups=train_df["base_year"],
+        #    test=test_df,
+        #    n_splits=n_splits,
+        #    n_rsb=n_rsb,
+        #    params=params,
+        # )
+
+    logger.info("TRAIN CatBoost")
     predictors = [
         x
         for x in train_df.columns
         if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
-    logger.debug(f"XGB predictors: {predictors}")
+    logger.debug(f"CBT predictors: {predictors}")
     if debug:
         n_splits = 2
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 5
+        n_rsb = 1
     params = {
-        "objective": "reg:squarederror",
-        "eval_metric": "mae",
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        # "tree_method": "gpu_hist",
+        "loss_function": "MAE",
+        "num_boost_round": 10000,
+        "early_stopping_rounds": 100,
+        "verbose_eval": 100,
+        "nan_mode": "Min",
+        "bootstrap_type": "Bernoulli",
+        "task_type": "GPU",
+        "learning_rate": 0.1,
     }
-    xgb_trainer = XGBTrainer(
+    cbt_trainer = CBTTrainer(
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -791,7 +851,8 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
     # submit
-    sample_submission["取引価格（総額）_log"] = xgb_trainer.pred
+    sample_submission["取引価格（総額）_log"] = cbt_trainer.pred
     sample_submission.to_csv("./submit.csv", index=False)
