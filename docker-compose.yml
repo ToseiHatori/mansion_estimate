@@ -1,4 +1,4 @@
-# jupyter対応
+# jupyter対応,
 version: "3"
 services:
   jupyter:
