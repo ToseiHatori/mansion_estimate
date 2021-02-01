@@ -1,1 +1,4 @@
-## 動かし方
+## build docker image
+```
+docker-compose up --build
+```
