@@ -675,7 +675,7 @@ class CBTTrainer(GroupKfoldTrainer):
 
         dtrain = Pool(X_train, label=Y_train, cat_features=self.categorical_cols, feature_names=self.predictors)
         dvalid = Pool(X_valid, label=Y_valid, cat_features=self.categorical_cols, feature_names=self.predictors)
-        model = CatBoost(params)
+        model = CatBoost(self.params)
         model.fit(dtrain, eval_set=dvalid, use_best_model=True, plot=False)
         ret = {}
         ret["model"] = model
@@ -727,132 +727,132 @@ if __name__ == "__main__":
             test_df = feather.read_dataframe(test_df_path)
             sample_submission = pd.read_csv("./data/raw/sample_submission.csv")
 
-        # logger.info("TRAIN LightGBM")
-        # predictors = [
-        #    x
-        #    for x in train_df.columns
-        #    if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
-        # ]
-        # logger.debug(f"LGBM predictors: {predictors}")
-        # if debug:
-        #    n_splits = 2
-        #    n_rsb = 1
-        # else:
-        #    n_splits = 6
-        #    n_rsb = 5
-        # params = {
-        #    "objective": "mae",
-        #    "boosting_type": "gbdt",
-        #    "subsample": 0.8,
-        #    "colsample_bytree": 0.8,
-        #    "device": "cpu",
-        #    # "max_bin": 240,
-        #    "verbosity": -1,
-        # }
-        # lgb_trainer = LGBTrainer(
-        #    state_path="./models",
-        #    predictors=predictors,
-        #    target_col="y",
-        #    X=train_df,
-        #    groups=train_df["base_year"],
-        #    test=test_df,
-        #    n_splits=n_splits,
-        #    n_rsb=n_rsb,
-        #    params=params,
-        #    categorical_cols=["pref", "pref_city", "pref_city_district"],
-        # )
+    # logger.info("TRAIN LightGBM")
+    # predictors = [
+    #    x
+    #    for x in train_df.columns
+    #    if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
+    # ]
+    # logger.debug(f"LGBM predictors: {predictors}")
+    # if debug:
+    #    n_splits = 2
+    #    n_rsb = 1
+    # else:
+    #    n_splits = 6
+    #    n_rsb = 5
+    # params = {
+    #    "objective": "mae",
+    #    "boosting_type": "gbdt",
+    #    "subsample": 0.8,
+    #    "colsample_bytree": 0.8,
+    #    "device": "cpu",
+    #    # "max_bin": 240,
+    #    "verbosity": -1,
+    # }
+    # lgb_trainer = LGBTrainer(
+    #    state_path="./models",
+    #    predictors=predictors,
+    #    target_col="y",
+    #    X=train_df,
+    #    groups=train_df["base_year"],
+    #    test=test_df,
+    #    n_splits=n_splits,
+    #    n_rsb=n_rsb,
+    #    params=params,
+    #    categorical_cols=["pref", "pref_city", "pref_city_district"],
+    # )
 
-        # logger.info("TRAIN NN")
-        # predictors = [
-        #    x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
-        # ]
-        # logger.debug(f"nn predictors: {predictors}")
-        # if debug:
-        #    n_splits = 2
-        #    n_rsb = 1
-        # else:
-        #    n_splits = 6
-        #    n_rsb = 1
-        # mlp_trainer = MLPTrainer(
-        #    state_path="./models",
-        #    predictors=predictors,
-        #    target_col="y",
-        #    X=train_df,
-        #    groups=train_df["base_year"],
-        #    test=test_df,
-        #    n_splits=n_splits,
-        #    n_rsb=n_rsb,
-        #    params={"n_epoch": 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
-        #    categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-        # )
+    # logger.info("TRAIN NN")
+    # predictors = [
+    #    x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
+    # ]
+    # logger.debug(f"nn predictors: {predictors}")
+    # if debug:
+    #    n_splits = 2
+    #    n_rsb = 1
+    # else:
+    #    n_splits = 6
+    #    n_rsb = 1
+    # mlp_trainer = MLPTrainer(
+    #    state_path="./models",
+    #    predictors=predictors,
+    #    target_col="y",
+    #    X=train_df,
+    #    groups=train_df["base_year"],
+    #    test=test_df,
+    #    n_splits=n_splits,
+    #    n_rsb=n_rsb,
+    #    params={"n_epoch": 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+    #    categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+    # )
 
-        # logger.info("TRAIN XGBoost")
-        # predictors = [
-        #    x
-        #    for x in train_df.columns
-        #    if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
-        # ]
-        # logger.debug(f"XGB predictors: {predictors}")
-        # if debug:
-        #    n_splits = 2
-        #    n_rsb = 1
-        # else:
-        #    n_splits = 6
-        #    n_rsb = 5
-        # params = {
-        #    "objective": "reg:squarederror",
-        #    "eval_metric": "mae",
-        #    "subsample": 0.8,
-        #    "colsample_bytree": 0.8,
-        #    "tree_method": "gpu_hist",
-        # }
-        # xgb_trainer = XGBTrainer(
-        #    state_path="./models",
-        #    predictors=predictors,
-        #    target_col="y",
-        #    X=train_df,
-        #    groups=train_df["base_year"],
-        #    test=test_df,
-        #    n_splits=n_splits,
-        #    n_rsb=n_rsb,
-        #    params=params,
-        # )
+    # logger.info("TRAIN XGBoost")
+    # predictors = [
+    #    x
+    #    for x in train_df.columns
+    #    if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
+    # ]
+    # logger.debug(f"XGB predictors: {predictors}")
+    # if debug:
+    #    n_splits = 2
+    #    n_rsb = 1
+    # else:
+    #    n_splits = 6
+    #    n_rsb = 5
+    # params = {
+    #    "objective": "reg:squarederror",
+    #    "eval_metric": "mae",
+    #    "subsample": 0.8,
+    #    "colsample_bytree": 0.8,
+    #    "tree_method": "gpu_hist",
+    # }
+    # xgb_trainer = XGBTrainer(
+    #    state_path="./models",
+    #    predictors=predictors,
+    #    target_col="y",
+    #    X=train_df,
+    #    groups=train_df["base_year"],
+    #    test=test_df,
+    #    n_splits=n_splits,
+    #    n_rsb=n_rsb,
+    #    params=params,
+    # )
 
-    logger.info("TRAIN CatBoost")
-    predictors = [
-        x
-        for x in train_df.columns
-        if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
-    ]
-    logger.debug(f"CBT predictors: {predictors}")
-    if debug:
-        n_splits = 2
-        n_rsb = 1
-    else:
-        n_splits = 6
-        n_rsb = 1
-    params = {
-        "loss_function": "MAE",
-        "num_boost_round": 10000,
-        "early_stopping_rounds": 100,
-        "verbose_eval": 100,
-        "nan_mode": "Min",
-        "bootstrap_type": "Bernoulli",
-        "task_type": "GPU",
-        "learning_rate": 0.1,
-    }
-    cbt_trainer = CBTTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
-    )
-    # submit
-    sample_submission["取引価格（総額）_log"] = cbt_trainer.pred
-    sample_submission.to_csv("./submit.csv", index=False)
+    # logger.info("TRAIN CatBoost")
+    # predictors = [
+    #     x
+    #     for x in train_df.columns
+    #     if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
+    # ]
+    # logger.debug(f"CBT predictors: {predictors}")
+    # if debug:
+    #     n_splits = 2
+    #     n_rsb = 1
+    # else:
+    #     n_splits = 6
+    #     n_rsb = 1
+    # params = {
+    #     "loss_function": "MAE",
+    #     "num_boost_round": 10000,
+    #     "early_stopping_rounds": 100,
+    #     "verbose_eval": 100,
+    #     "nan_mode": "Min",
+    #     "bootstrap_type": "Bernoulli",
+    #     "task_type": "GPU",
+    #     "learning_rate": 0.1,
+    # }
+    # cbt_trainer = CBTTrainer(
+    #     state_path="./models",
+    #     predictors=predictors,
+    #     target_col="y",
+    #     X=train_df,
+    #     groups=train_df["base_year"],
+    #     test=test_df,
+    #     n_splits=n_splits,
+    #     n_rsb=n_rsb,
+    #     params=params,
+    #     categorical_cols=["pref", "pref_city", "pref_city_district"],
+    # )
+    # # submit
+    # sample_submission["取引価格（総額）_log"] = cbt_trainer.pred
+    # sample_submission.to_csv("./submit.csv", index=False)
