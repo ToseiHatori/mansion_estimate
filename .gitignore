@@ -6,6 +6,9 @@
 *.zgip
 *.pickle
 *.feather
+*.tsv
+*.json
+*.tfevents
 catboost_info
 .vscode
 # Byte-compiled / optimized / DLL files
