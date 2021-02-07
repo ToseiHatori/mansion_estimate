@@ -30,6 +30,8 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
+from scipy.optimize import minimize
+from sklearn.model_selection import KFold
 
 # 日付とutil系
 dt_now = datetime.datetime.now()
@@ -676,43 +678,53 @@ class CBTTrainer(GroupKfoldTrainer):
         return pred
 
 
+def get_score(weights, train_idx, oofs, labels):
+    blend = np.zeros_like(oofs[0][train_idx])
+
+    for oof, weight in zip(oofs[:-1], weights):
+        blend += weight * oof[train_idx]
+
+    blend += (1 - np.sum(weights)) * oofs[-1][train_idx]
+
+    return mean_absolute_error(labels[train_idx], blend)
+
+
+def get_best_weights(oofs, labels):
+    weight_list = []
+    weights = np.array([1 / len(oofs) for x in range(len(oofs) - 1)])
+
+    for n_splits in tqdm([5, 6]):
+        for i in range(2):
+            kf = KFold(n_splits=n_splits, random_state=i, shuffle=True)
+            for fold, (train_idx, valid_idx) in enumerate(kf.split(X=oofs[0])):
+                res = minimize(get_score, weights, args=(train_idx, oofs, labels), method="Nelder-Mead", tol=1e-6)
+                tprint(f"i: {i} fold: {fold} res.x: {res.x}")
+                weight_list.append(res.x)
+
+    mean_weight = np.mean(weight_list, axis=0)
+    tprint(f"optimized weight: {mean_weight}")
+    return mean_weight
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug")
-    parser.add_argument("--update_dm")
     args = parser.parse_args()
     debug = args.debug
-    update_dm = args.update_dm
-    if update_dm is None:
-        update_dm = False
-    else:
-        update_dm = True
     if debug is None:
         debug = False
     else:
         debug = True
     tprint(f"debug mode {debug}")
-    tprint(f"update dm  {update_dm}")
 
     train_df_path = "./data/processed/train_df.feather"
     test_df_path = "./data/processed/test_df.feather"
+    tprint("loading data")
+    train_df, test_df, sample_submission = get_data()
+    tprint("preprocessing data")
+    train_df, test_df = preprocess(train_df, test_df)
     if debug:
-        tprint("loading data")
-        train_df, test_df, sample_submission = get_data()
-        tprint("preprocessing data")
-        train_df, test_df = preprocess(train_df, test_df)
-    else:
-        if (not os.path.exists(train_df_path)) | update_dm:
-            tprint("loading data")
-            train_df, test_df, sample_submission = get_data()
-            tprint("preprocessing data")
-            train_df, test_df = preprocess(train_df, test_df)
-            feather.write_dataframe(train_df, train_df_path)
-            feather.write_dataframe(test_df, test_df_path)
-        else:
-            train_df = feather.read_dataframe(train_df_path)
-            test_df = feather.read_dataframe(test_df_path)
-            sample_submission = pd.read_csv("./data/raw/sample_submission.csv")
+        train_df = train_df.sample(1000).reset_index(drop=True)
     tprint("TRAIN LightGBM")
     predictors = [
         x
@@ -725,7 +737,7 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 5
+        n_rsb = 1
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
@@ -767,7 +779,7 @@ if __name__ == "__main__":
         test=test_df,
         n_splits=n_splits,
         n_rsb=n_rsb,
-        params={"n_epoch": 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+        params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
 
@@ -783,13 +795,13 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 5
+        n_rsb = 1
     params = {
         "objective": "reg:squarederror",
         "eval_metric": "mae",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "tree_method": "gpu_hist",
+        "tree_method": "hist" if debug else "gpu_hist",
     }
     xgb_trainer = XGBTrainer(
         state_path="./models",
@@ -823,7 +835,7 @@ if __name__ == "__main__":
         "verbose_eval": 100,
         "nan_mode": "Min",
         "bootstrap_type": "Bernoulli",
-        "task_type": "GPU",
+        "task_type": "CPU" if debug else "GPU",
         "learning_rate": 0.1,
     }
     cbt_trainer = CBTTrainer(
@@ -838,7 +850,18 @@ if __name__ == "__main__":
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
+
+    # blending
+    stage2_oofs = [lgb_trainer.oof, mlp_trainer.oof, xgb_trainer.oof, cbt_trainer.oof]
+    stage2_preds = [lgb_trainer.pred, mlp_trainer.pred, xgb_trainer.pred, cbt_trainer.pred]
+    best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
+    best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
+    tprint("post processed optimized weight", best_weights)
+    oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
+    blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
+    tprint("final oof score", mean_absolute_error(train_df["y"].values, oof_preds))
+
     # submit
-    sample_submission["取引価格（総額）_log"] = cbt_trainer.pred
+    sample_submission["取引価格（総額）_log"] = blend_preds
     sample_submission.to_csv("./submit.csv", index=False)
     tprint("---おわり---")
