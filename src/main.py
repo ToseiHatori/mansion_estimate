@@ -744,6 +744,7 @@ if __name__ == "__main__":
         "subsample": 0.8,
         "colsample_bytree": 0.8,
         "device": "cpu",
+        "learning_rate": 0.2,
         "verbosity": -1,
     }
     lgb_trainer = LGBTrainer(
