@@ -32,6 +32,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 from scipy.optimize import minimize
 from sklearn.model_selection import KFold
+from cache import Cache
 
 # 日付とutil系
 dt_now = datetime.datetime.now()
