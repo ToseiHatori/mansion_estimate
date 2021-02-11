@@ -54,6 +54,7 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = False
 
 
+@Cache("./cache")
 def get_data():
     unuse_columns = ["種類", "地域", "市区町村コード", "土地の形状", "間口", "延床面積（㎡）", "前面道路：方位", "前面道路：種類", "前面道路：幅員（ｍ）"]
     train_files = sorted(glob.glob("./data/raw/train/*"))
@@ -68,6 +69,7 @@ def get_data():
     return train_df, test_df, sample_submission
 
 
+@Cache("./cache")
 def preprocess(train_df, test_df):
     # 目的変数rename
     train_df = train_df.rename(columns={"取引価格（総額）_log": "y"})
