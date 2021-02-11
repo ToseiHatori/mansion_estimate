@@ -718,8 +718,6 @@ if __name__ == "__main__":
         debug = True
     tprint(f"debug mode {debug}")
 
-    train_df_path = "./data/processed/train_df.feather"
-    test_df_path = "./data/processed/test_df.feather"
     tprint("loading data")
     train_df, test_df, sample_submission = get_data()
     tprint("preprocessing data")
