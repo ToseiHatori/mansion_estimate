@@ -721,9 +721,9 @@ if __name__ == "__main__":
     tprint(f"debug mode {debug}")
 
     tprint("loading data")
-    train_df, test_df, sample_submission = get_data()
+    (train_df, test_df, sample_submission) = get_data()
     tprint("preprocessing data")
-    train_df, test_df = preprocess(train_df, test_df)
+    (train_df, test_df) = preprocess(train_df, test_df)
     if debug:
         train_df = train_df.sample(1000).reset_index(drop=True)
     tprint("TRAIN LightGBM")
