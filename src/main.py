@@ -279,6 +279,7 @@ class GroupKfoldTrainer(object):
             Y_train, Y_valid = self.X.loc[train_idx, self.target_col], self.X.loc[valid_idx, self.target_col]
             tprint(f"training years : {set(self.X.loc[train_idx, 'base_year'])}")
             tprint(f"validation years : {set(self.X.loc[valid_idx, 'base_year'])}")
+            tprint(X_train.head())
 
             # random seed blending
             for rsb_idx in range(self.n_rsb):
@@ -460,9 +461,9 @@ class MLPTrainer(GroupKfoldTrainer):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.categorical_cols = categorical_cols
         self.numeric_cols = [x for x in predictors if x not in categorical_cols]
-        X, test = self.preprocess(X, test, self.numeric_cols)
+        _X, _test = self.preprocess(X, test, self.numeric_cols)
         self.params = params
-        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+        super().__init__(state_path, predictors, target_col, _X, groups, _test, n_splits, n_rsb)
 
     def _get_importance(self, model, importance_type="gain"):
         importance = pd.DataFrame({"features": [], "importance": []})
@@ -471,16 +472,18 @@ class MLPTrainer(GroupKfoldTrainer):
     @staticmethod
     def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
         # -1埋め
-        train_df[numeric_cols] = train_df[numeric_cols].fillna(-1)
-        test_df[numeric_cols] = test_df[numeric_cols].fillna(-1)
+        _train_df = train_df.copy()
+        _test_df = test_df.copy()
+        _train_df[numeric_cols] = _train_df[numeric_cols].fillna(-1)
+        _test_df[numeric_cols] = _test_df[numeric_cols].fillna(-1)
 
         tprint("scaling...")
-        # transformer = MinMaxScaler()
-        transformer = RobustScaler()
-        train_df[numeric_cols] = transformer.fit_transform(train_df[numeric_cols])
-        test_df[numeric_cols] = transformer.transform(test_df[numeric_cols])
+        transformer = MinMaxScaler()
+        # transformer = RobustScaler()
+        _train_df[numeric_cols] = transformer.fit_transform(_train_df[numeric_cols])
+        _test_df[numeric_cols] = transformer.transform(_test_df[numeric_cols])
         gc.collect()
-        return train_df, test_df
+        return _train_df, _test_df
 
     def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
         set_seed(loop_seed)
@@ -753,7 +756,6 @@ if __name__ == "__main__":
         for x in train_df.columns
         if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
-    tprint(f"LGBM predictors: {predictors}")
     if debug:
         n_splits = 2
         n_rsb = 1
@@ -783,10 +785,6 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
     tprint("TRAIN NN")
-    predictors = [
-        x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
-    ]
-    tprint(f"nn predictors: {predictors}")
     mlp_trainer = fit_trainer(
         Basetrainer=MLPTrainer,
         state_path="./models",
@@ -801,12 +799,6 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     tprint("TRAIN XGBoost")
-    predictors = [
-        x
-        for x in train_df.columns
-        if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
-    ]
-    tprint(f"XGB predictors: {predictors}")
     params = {
         "objective": "reg:squarederror",
         "eval_metric": "mae",
@@ -829,12 +821,6 @@ if __name__ == "__main__":
     )
 
     tprint("TRAIN CatBoost")
-    predictors = [
-        x
-        for x in train_df.columns
-        if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
-    ]
-    tprint(f"CBT predictors: {predictors}")
     params = {
         "loss_function": "MAE",
         "num_boost_round": 10000,
