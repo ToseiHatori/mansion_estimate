@@ -53,7 +53,7 @@ def set_seed(seed):
 
 
 @Cache("./cache")
-def get_data():
+def get_data(debug):
     unuse_columns = ["種類", "地域", "市区町村コード", "土地の形状", "間口", "延床面積（㎡）", "前面道路：方位", "前面道路：種類", "前面道路：幅員（ｍ）"]
     train_files = sorted(glob.glob("./data/raw/train/*"))
     if debug:
@@ -727,7 +727,7 @@ if __name__ == "__main__":
     tprint(f"debug mode {debug}")
 
     tprint("loading data")
-    (train_df, test_df, sample_submission) = get_data()
+    (train_df, test_df, sample_submission) = get_data(debug)
     tprint("preprocessing data")
     (train_df, test_df) = preprocess(train_df, test_df)
     if debug:
