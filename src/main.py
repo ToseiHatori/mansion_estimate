@@ -606,7 +606,8 @@ class MLPTrainer(GroupKfoldTrainer):
 
 
 class XGBTrainer(GroupKfoldTrainer):
-    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
+        self.categorical_cols = categorical_cols
         self.params = params
         super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
 
@@ -692,6 +693,7 @@ def get_score(weights, train_idx, oofs, labels):
     return mean_absolute_error(labels[train_idx], blend)
 
 
+@Cache("./cache")
 def get_best_weights(oofs, labels):
     weight_list = []
     weights = np.array([1 / len(oofs) for x in range(len(oofs) - 1)])
@@ -707,6 +709,25 @@ def get_best_weights(oofs, labels):
     mean_weight = np.mean(weight_list, axis=0)
     tprint(f"optimized weight: {mean_weight}")
     return mean_weight
+
+
+@Cache("./cache")
+def fit_trainer(
+    Basetrainer, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols
+):
+    trainer = Basetrainer(
+        state_path=state_path,
+        predictors=predictors,
+        target_col=target_col,
+        X=X,
+        groups=groups,
+        test=test,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params=params,
+        categorical_cols=categorical_cols,
+    )
+    return trainer
 
 
 if __name__ == "__main__":
@@ -725,7 +746,7 @@ if __name__ == "__main__":
     tprint("preprocessing data")
     (train_df, test_df) = preprocess(train_df, test_df)
     if debug:
-        train_df = train_df.sample(1000).reset_index(drop=True)
+        train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
     tprint("TRAIN LightGBM")
     predictors = [
         x
@@ -748,7 +769,8 @@ if __name__ == "__main__":
         "learning_rate": 0.2,
         "verbosity": -1,
     }
-    lgb_trainer = LGBTrainer(
+    lgb_trainer = fit_trainer(
+        Basetrainer=LGBTrainer,
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -760,19 +782,13 @@ if __name__ == "__main__":
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
-
     tprint("TRAIN NN")
     predictors = [
         x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
     tprint(f"nn predictors: {predictors}")
-    if debug:
-        n_splits = 2
-        n_rsb = 1
-    else:
-        n_splits = 6
-        n_rsb = 1
-    mlp_trainer = MLPTrainer(
+    mlp_trainer = fit_trainer(
+        Basetrainer=MLPTrainer,
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -784,7 +800,6 @@ if __name__ == "__main__":
         params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
-
     tprint("TRAIN XGBoost")
     predictors = [
         x
@@ -792,12 +807,6 @@ if __name__ == "__main__":
         if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
     tprint(f"XGB predictors: {predictors}")
-    if debug:
-        n_splits = 2
-        n_rsb = 1
-    else:
-        n_splits = 6
-        n_rsb = 1
     params = {
         "objective": "reg:squarederror",
         "eval_metric": "mae",
@@ -805,7 +814,8 @@ if __name__ == "__main__":
         "colsample_bytree": 0.8,
         "tree_method": "hist" if debug else "gpu_hist",
     }
-    xgb_trainer = XGBTrainer(
+    xgb_trainer = fit_trainer(
+        Basetrainer=XGBTrainer,
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -815,6 +825,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
+        categorical_cols=[],
     )
 
     tprint("TRAIN CatBoost")
@@ -824,12 +835,6 @@ if __name__ == "__main__":
         if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
     tprint(f"CBT predictors: {predictors}")
-    if debug:
-        n_splits = 2
-        n_rsb = 1
-    else:
-        n_splits = 6
-        n_rsb = 1
     params = {
         "loss_function": "MAE",
         "num_boost_round": 10000,
@@ -840,7 +845,8 @@ if __name__ == "__main__":
         "task_type": "CPU" if debug else "GPU",
         "learning_rate": 0.1,
     }
-    cbt_trainer = CBTTrainer(
+    cbt_trainer = fit_trainer(
+        Basetrainer=CBTTrainer,
         state_path="./models",
         predictors=predictors,
         target_col="y",
