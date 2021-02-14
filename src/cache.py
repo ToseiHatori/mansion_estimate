@@ -26,16 +26,17 @@ class Cache:
             # 受け取ったパラメータをシグネチャにバインドする
             bound_args = sig.bind(*args, **kwargs)
             # 関数名やバインドしたパラメータの対応関係を取得する
-            func_args = ",".join("{k}={v}".format(k=k, v=v) for k, v in bound_args.arguments.items())
             for k, v in bound_args.arguments.items():
                 if k == "trainer_instance":
                     # trainerがあればメンバー変数を取得
-                    func_args_list.append(",".join("{_k}={_v}".format(_k=_k, _v=_v) for _k, _v in vars(v).items()))
-                    # 関数があればその定義を取得しておく
+                    member_vars = ",".join("{_k}={_v}".format(_k=_k, _v=_v) for _k, _v in vars(v).items())
+                    func_args_list.append(member_vars)
+                    # methodがあればその定義を取得しておく
                     for x in inspect.getmembers(v, inspect.ismethod):
                         func_args_list.append(inspect.getsource(x[1]))
                 else:
                     func_args_list.append(f"{k}={v}")
+            func_args_list = sorted(func_args_list)
             func_args = "_".join(func_args_list)
             func_info = func_source.encode("utf-8") + func_args.encode("utf-8")
             func_hash = hashlib.md5(func_info).hexdigest()

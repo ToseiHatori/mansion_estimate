@@ -35,8 +35,6 @@ from sklearn.model_selection import KFold
 from cache import Cache
 
 # 日付とutil系
-dt_now = datetime.datetime.now()
-dt_now = dt_now.strftime("%Y%m%d_%H:%M")
 gc.enable()
 pd.options.display.max_columns = None
 
@@ -239,7 +237,7 @@ class GroupKfoldTrainer(object):
         self.validation_score = []
         self.folds = []
         self.state_path = Path(state_path)
-        self.file_path = self.state_path.joinpath(f"{self.name}_{dt_now}.pickle")
+        self.file_path = self.state_path.joinpath(f"{self.name}.pickle")
 
     def loss_(sel, predictions, targets):
         return mean_absolute_error(targets, predictions)
