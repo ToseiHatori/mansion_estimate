@@ -240,11 +240,8 @@ class GroupKfoldTrainer(object):
         self.folds = []
         self.state_path = Path(state_path)
         self.file_path = self.state_path.joinpath(f"{self.name}_{dt_now}.pickle")
-        # 無法者なのでここで呼んじゃう
-        self.fit()
-        self.save()
 
-    def loss_(self, predictions, targets):
+    def loss_(sel, predictions, targets):
         return mean_absolute_error(targets, predictions)
 
     def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
@@ -279,7 +276,6 @@ class GroupKfoldTrainer(object):
             Y_train, Y_valid = self.X.loc[train_idx, self.target_col], self.X.loc[valid_idx, self.target_col]
             tprint(f"training years : {set(self.X.loc[train_idx, 'base_year'])}")
             tprint(f"validation years : {set(self.X.loc[valid_idx, 'base_year'])}")
-            tprint(X_train.head())
 
             # random seed blending
             for rsb_idx in range(self.n_rsb):
@@ -715,22 +711,10 @@ def get_best_weights(oofs, labels):
 
 
 @Cache("./cache")
-def fit_trainer(
-    Basetrainer, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols
-):
-    trainer = Basetrainer(
-        state_path=state_path,
-        predictors=predictors,
-        target_col=target_col,
-        X=X,
-        groups=groups,
-        test=test,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        params=params,
-        categorical_cols=categorical_cols,
-    )
-    return trainer
+def fit_trainer(trainer_instance):
+    trainer_instance.fit()
+    trainer_instance.save()
+    return trainer_instance
 
 
 if __name__ == "__main__":
@@ -771,8 +755,7 @@ if __name__ == "__main__":
         "learning_rate": 0.2,
         "verbosity": -1,
     }
-    lgb_trainer = fit_trainer(
-        Basetrainer=LGBTrainer,
+    lgb_trainer = LGBTrainer(
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -784,9 +767,10 @@ if __name__ == "__main__":
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
+    lgb_trainer = fit_trainer(lgb_trainer)
+
     tprint("TRAIN NN")
-    mlp_trainer = fit_trainer(
-        Basetrainer=MLPTrainer,
+    mlp_trainer = MLPTrainer(
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -798,6 +782,7 @@ if __name__ == "__main__":
         params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
+    mlp_trainer = fit_trainer(mlp_trainer)
     tprint("TRAIN XGBoost")
     params = {
         "objective": "reg:squarederror",
@@ -806,8 +791,7 @@ if __name__ == "__main__":
         "colsample_bytree": 0.8,
         "tree_method": "hist" if debug else "gpu_hist",
     }
-    xgb_trainer = fit_trainer(
-        Basetrainer=XGBTrainer,
+    xgb_trainer = XGBTrainer(
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -819,6 +803,7 @@ if __name__ == "__main__":
         params=params,
         categorical_cols=[],
     )
+    xgb_trainer = fit_trainer(xgb_trainer)
 
     tprint("TRAIN CatBoost")
     params = {
@@ -831,8 +816,7 @@ if __name__ == "__main__":
         "task_type": "CPU" if debug else "GPU",
         "learning_rate": 0.1,
     }
-    cbt_trainer = fit_trainer(
-        Basetrainer=CBTTrainer,
+    cbt_trainer = CBTTrainer(
         state_path="./models",
         predictors=predictors,
         target_col="y",
@@ -844,6 +828,7 @@ if __name__ == "__main__":
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
+    cbt_trainer = fit_trainer(cbt_trainer)
 
     # blending
     stage2_oofs = [lgb_trainer.oof, mlp_trainer.oof, xgb_trainer.oof, cbt_trainer.oof]
