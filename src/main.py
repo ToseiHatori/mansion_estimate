@@ -35,8 +35,6 @@ from sklearn.model_selection import KFold
 from cache import Cache
 
 # 日付とutil系
-dt_now = datetime.datetime.now()
-dt_now = dt_now.strftime("%Y%m%d_%H:%M")
 gc.enable()
 pd.options.display.max_columns = None
 
@@ -54,7 +52,8 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = False
 
 
-def get_data():
+@Cache("./cache")
+def get_data(debug):
     unuse_columns = ["種類", "地域", "市区町村コード", "土地の形状", "間口", "延床面積（㎡）", "前面道路：方位", "前面道路：種類", "前面道路：幅員（ｍ）"]
     train_files = sorted(glob.glob("./data/raw/train/*"))
     if debug:
@@ -68,6 +67,7 @@ def get_data():
     return train_df, test_df, sample_submission
 
 
+@Cache("./cache")
 def preprocess(train_df, test_df):
     # 目的変数rename
     train_df = train_df.rename(columns={"取引価格（総額）_log": "y"})
@@ -237,12 +237,9 @@ class GroupKfoldTrainer(object):
         self.validation_score = []
         self.folds = []
         self.state_path = Path(state_path)
-        self.file_path = self.state_path.joinpath(f"{self.name}_{dt_now}.pickle")
-        # 無法者なのでここで呼んじゃう
-        self.fit()
-        self.save()
+        self.file_path = self.state_path.joinpath(f"{self.name}.pickle")
 
-    def loss_(self, predictions, targets):
+    def loss_(sel, predictions, targets):
         return mean_absolute_error(targets, predictions)
 
     def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
@@ -458,9 +455,9 @@ class MLPTrainer(GroupKfoldTrainer):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.categorical_cols = categorical_cols
         self.numeric_cols = [x for x in predictors if x not in categorical_cols]
-        X, test = self.preprocess(X, test, self.numeric_cols)
+        _X, _test = self.preprocess(X, test, self.numeric_cols)
         self.params = params
-        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+        super().__init__(state_path, predictors, target_col, _X, groups, _test, n_splits, n_rsb)
 
     def _get_importance(self, model, importance_type="gain"):
         importance = pd.DataFrame({"features": [], "importance": []})
@@ -469,16 +466,18 @@ class MLPTrainer(GroupKfoldTrainer):
     @staticmethod
     def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
         # -1埋め
-        train_df[numeric_cols] = train_df[numeric_cols].fillna(-1)
-        test_df[numeric_cols] = test_df[numeric_cols].fillna(-1)
+        _train_df = train_df.copy()
+        _test_df = test_df.copy()
+        _train_df[numeric_cols] = _train_df[numeric_cols].fillna(-1)
+        _test_df[numeric_cols] = _test_df[numeric_cols].fillna(-1)
 
         tprint("scaling...")
-        # transformer = MinMaxScaler()
-        transformer = RobustScaler()
-        train_df[numeric_cols] = transformer.fit_transform(train_df[numeric_cols])
-        test_df[numeric_cols] = transformer.transform(test_df[numeric_cols])
+        transformer = MinMaxScaler()
+        # transformer = RobustScaler()
+        _train_df[numeric_cols] = transformer.fit_transform(_train_df[numeric_cols])
+        _test_df[numeric_cols] = transformer.transform(_test_df[numeric_cols])
         gc.collect()
-        return train_df, test_df
+        return _train_df, _test_df
 
     def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
         set_seed(loop_seed)
@@ -604,7 +603,8 @@ class MLPTrainer(GroupKfoldTrainer):
 
 
 class XGBTrainer(GroupKfoldTrainer):
-    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
+        self.categorical_cols = categorical_cols
         self.params = params
         super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
 
@@ -690,6 +690,7 @@ def get_score(weights, train_idx, oofs, labels):
     return mean_absolute_error(labels[train_idx], blend)
 
 
+@Cache("./cache")
 def get_best_weights(oofs, labels):
     weight_list = []
     weights = np.array([1 / len(oofs) for x in range(len(oofs) - 1)])
@@ -707,6 +708,13 @@ def get_best_weights(oofs, labels):
     return mean_weight
 
 
+@Cache("./cache")
+def fit_trainer(trainer_instance):
+    trainer_instance.fit()
+    trainer_instance.save()
+    return trainer_instance
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug")
@@ -718,34 +726,31 @@ if __name__ == "__main__":
         debug = True
     tprint(f"debug mode {debug}")
 
-    train_df_path = "./data/processed/train_df.feather"
-    test_df_path = "./data/processed/test_df.feather"
     tprint("loading data")
-    train_df, test_df, sample_submission = get_data()
+    (train_df, test_df, sample_submission) = get_data(debug)
     tprint("preprocessing data")
-    train_df, test_df = preprocess(train_df, test_df)
+    (train_df, test_df) = preprocess(train_df, test_df)
     if debug:
-        train_df = train_df.sample(1000).reset_index(drop=True)
+        train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
     tprint("TRAIN LightGBM")
     predictors = [
         x
         for x in train_df.columns
         if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
-    tprint(f"LGBM predictors: {predictors}")
     if debug:
         n_splits = 2
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 1
+        n_rsb = 5
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
         "device": "cpu",
-        "learning_rate": 0.2,
+        "learning_rate": 0.1,
         "verbosity": -1,
     }
     lgb_trainer = LGBTrainer(
@@ -760,18 +765,9 @@ if __name__ == "__main__":
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
+    lgb_trainer = fit_trainer(lgb_trainer)
 
     tprint("TRAIN NN")
-    predictors = [
-        x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
-    ]
-    tprint(f"nn predictors: {predictors}")
-    if debug:
-        n_splits = 2
-        n_rsb = 1
-    else:
-        n_splits = 6
-        n_rsb = 1
     mlp_trainer = MLPTrainer(
         state_path="./models",
         predictors=predictors,
@@ -784,20 +780,8 @@ if __name__ == "__main__":
         params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
-
+    mlp_trainer = fit_trainer(mlp_trainer)
     tprint("TRAIN XGBoost")
-    predictors = [
-        x
-        for x in train_df.columns
-        if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
-    ]
-    tprint(f"XGB predictors: {predictors}")
-    if debug:
-        n_splits = 2
-        n_rsb = 1
-    else:
-        n_splits = 6
-        n_rsb = 1
     params = {
         "objective": "reg:squarederror",
         "eval_metric": "mae",
@@ -815,21 +799,11 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
+        categorical_cols=[],
     )
+    xgb_trainer = fit_trainer(xgb_trainer)
 
     tprint("TRAIN CatBoost")
-    predictors = [
-        x
-        for x in train_df.columns
-        if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
-    ]
-    tprint(f"CBT predictors: {predictors}")
-    if debug:
-        n_splits = 2
-        n_rsb = 1
-    else:
-        n_splits = 6
-        n_rsb = 1
     params = {
         "loss_function": "MAE",
         "num_boost_round": 10000,
@@ -852,6 +826,7 @@ if __name__ == "__main__":
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
+    cbt_trainer = fit_trainer(cbt_trainer)
 
     # blending
     stage2_oofs = [lgb_trainer.oof, mlp_trainer.oof, xgb_trainer.oof, cbt_trainer.oof]

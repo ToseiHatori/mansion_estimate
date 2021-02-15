@@ -1,50 +1,69 @@
 from typing import Any, Union, Dict, List, Callable, Optional, ByteString, Tuple
-import hashlib
-import pickle
-from pandas.util import hash_pandas_object
-import pandas as pd
 from pathlib import Path
+import hashlib
+import inspect
 from inspect import signature
-import numpy as np
-from collections import OrderedDict
-import operator
-import functools
-import json
-from json import JSONEncoder
-
-try:
-    from collections.abc import Mapping
-except ImportError:
-    from collections import Mapping
-
-
-def _hash(obj: ByteString) -> str:
-    return hashlib.md5(obj).hexdigest()
+import pickle
+import os
 
 
 class Cache:
-    def __init__(self, dir_path: str, rerun: bool = False, with_param: bool = False):
+    def __init__(self, dir_path: str, func_name: str = None):
         self.dir_path = Path(dir_path)
         self.dir_path.mkdir(exist_ok=True)
-        self.with_param = with_param
-        self.rerun = rerun
+        self.func_name = func_name
 
     def __call__(self, func: Callable):
-        func_name = func.__name__
-
         def wrapper(*args, **kwargs):
-            sig = signature(func)
-            # ignore default value
-            bound_args = sig.bind(*args, **kwargs)
-            unique_id: str = self._get_unique_id(bound_args.arguments)
-            path: Path = self.dir_path.joinpath(f"{func_name}_{unique_id}")
+            if self.func_name is None:
+                self.func_name = func.__name__
 
-            logger.info(f"{func_name}_{unique_id} has been called")
-            ret = Cache._read_cache(path, rerun=self.rerun)
-            if ret is None:
-                logger.info(f"{func_name}_{unique_id} cache not found")
+            # 関数そのものの文字列
+            func_source = inspect.getsource(func)
+            # 引数取得(https://blog.amedama.jp/entry/2016/10/31/225219)
+            func_args_list = []
+            sig = signature(func)
+            # 受け取ったパラメータをシグネチャにバインドする
+            bound_args = sig.bind(*args, **kwargs)
+            # 関数名やバインドしたパラメータの対応関係を取得する
+            for k, v in bound_args.arguments.items():
+                if k == "trainer_instance":
+                    # trainerがあればメンバー変数を取得
+                    member_vars = ",".join("{_k}={_v}".format(_k=_k, _v=_v) for _k, _v in vars(v).items())
+                    func_args_list.append(member_vars)
+                    # methodがあればその定義を取得しておく
+                    for x in inspect.getmembers(v, inspect.ismethod):
+                        func_args_list.append(inspect.getsource(x[1]))
+                else:
+                    func_args_list.append(f"{k}={v}")
+            func_args_list = sorted(func_args_list)
+            func_args = "_".join(func_args_list)
+            func_info = func_source.encode("utf-8") + func_args.encode("utf-8")
+            func_hash = hashlib.md5(func_info).hexdigest()
+            # 関数ごとにキャッシュdirを作る
+            cache_dir = self.dir_path / self.func_name
+            cache_dir.mkdir(exist_ok=True)
+            cache_path = cache_dir / (func_hash + ".pickle")
+
+            if os.path.exists(cache_path):
+                print(f"cache hit {self.func_name}: {cache_path}")
+                ret = self.load(cache_path)
+            else:
+                print(f"cache does not hit {self.func_name}: {cache_path}")
                 ret = func(*args, **kwargs)
-                Cache._write(path, ret)
+                self.save(ret, cache_path)
             return ret
 
         return wrapper
+
+    @staticmethod
+    def save(obj: object, file_path: str):
+        with open(file_path, "wb") as f:
+            pickle.dump(obj, f)
+        return 0
+
+    @staticmethod
+    def load(file_path: str):
+        with open(file_path, "rb") as f:
+            ret = pickle.load(f)
+        return ret
