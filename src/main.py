@@ -743,14 +743,14 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 1
+        n_rsb = 5
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
         "device": "cpu",
-        "learning_rate": 0.2,
+        "learning_rate": 0.1,
         "verbosity": -1,
     }
     lgb_trainer = LGBTrainer(
