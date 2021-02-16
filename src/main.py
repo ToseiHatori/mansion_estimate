@@ -35,7 +35,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 
-# 日付とutil系
 gc.enable()
 pd.options.display.max_columns = None
 
@@ -806,7 +805,7 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 5
+        n_rsb = 2
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
