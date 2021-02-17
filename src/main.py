@@ -838,7 +838,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=n_rsb,
+        n_rsb=1,
         params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
