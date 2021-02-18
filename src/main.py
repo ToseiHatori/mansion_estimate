@@ -360,7 +360,8 @@ class GroupKfoldTrainer(object):
                 # 学習
                 ret = self._fit(X_train, Y_train, X_valid, Y_valid, loop_seed=rsb_idx)
                 # save models
-                self.folds.append(ret)
+                if (fold_cnt == 1) & (rsb_idx == 0):
+                    self.folds.append(ret)
                 model = ret["model"]
 
                 # oof, predに対して予測
@@ -772,7 +773,6 @@ if __name__ == "__main__":
     (train_df, test_df) = preprocess(train_df, test_df)
     if debug:
         train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
-    tprint("TRAIN LightGBM")
     predictors = [
         x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
@@ -782,6 +782,46 @@ if __name__ == "__main__":
     else:
         n_splits = 6
         n_rsb = 2
+
+    tprint("TRAIN XGBoost")
+    params = {
+        "objective": "reg:squarederror",
+        "eval_metric": "mae",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "eta": 0.1,
+        "tree_method": "hist" if debug else "gpu_hist",
+    }
+    xgb_trainer = XGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=2,
+        params=params,
+        categorical_cols=[],
+    )
+    xgb_trainer = fit_trainer(xgb_trainer)
+
+    tprint("TRAIN NN")
+    mlp_trainer = MLPTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=1,
+        params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+    )
+    mlp_trainer = fit_trainer(mlp_trainer)
+
+    tprint("TRAIN LightGBM")
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
@@ -804,42 +844,6 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
     lgb_trainer = fit_trainer(lgb_trainer)
-
-    tprint("TRAIN NN")
-    mlp_trainer = MLPTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=1,
-        params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
-        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-    )
-    mlp_trainer = fit_trainer(mlp_trainer)
-    tprint("TRAIN XGBoost")
-    params = {
-        "objective": "reg:squarederror",
-        "eval_metric": "mae",
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "tree_method": "hist" if debug else "gpu_hist",
-    }
-    xgb_trainer = XGBTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        params=params,
-        categorical_cols=[],
-    )
-    xgb_trainer = fit_trainer(xgb_trainer)
 
     # blending
     stage2_oofs = [lgb_trainer.oof, mlp_trainer.oof, xgb_trainer.oof]
