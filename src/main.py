@@ -781,45 +781,46 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 2
+        n_rsb = 5
 
-    tprint("TRAIN XGBoost")
-    params = {
-        "objective": "reg:squarederror",
-        "eval_metric": "mae",
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "eta": 0.1,
-        "tree_method": "hist" if debug else "gpu_hist",
-    }
-    xgb_trainer = XGBTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=3,
-        params=params,
-        categorical_cols=[],
-    )
-    xgb_trainer = fit_trainer(xgb_trainer)
+    if False:
+        tprint("TRAIN XGBoost")
+        params = {
+            "objective": "reg:squarederror",
+            "eval_metric": "mae",
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "eta": 0.1,
+            "tree_method": "hist" if debug else "gpu_hist",
+        }
+        xgb_trainer = XGBTrainer(
+            state_path="./models",
+            predictors=predictors,
+            target_col="y",
+            X=train_df,
+            groups=train_df["base_year"],
+            test=test_df,
+            n_splits=n_splits,
+            n_rsb=3,
+            params=params,
+            categorical_cols=[],
+        )
+        xgb_trainer = fit_trainer(xgb_trainer)
 
-    tprint("TRAIN NN")
-    mlp_trainer = MLPTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=1,
-        params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
-        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-    )
-    mlp_trainer = fit_trainer(mlp_trainer)
+        tprint("TRAIN NN")
+        mlp_trainer = MLPTrainer(
+            state_path="./models",
+            predictors=predictors,
+            target_col="y",
+            X=train_df,
+            groups=train_df["base_year"],
+            test=test_df,
+            n_splits=n_splits,
+            n_rsb=1,
+            params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+            categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+        )
+        mlp_trainer = fit_trainer(mlp_trainer)
 
     tprint("TRAIN LightGBM")
     params = {
