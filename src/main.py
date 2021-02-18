@@ -746,14 +746,7 @@ def fit_trainer(trainer_instance):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--debug")
-    args = parser.parse_args()
-    debug = args.debug
-    if debug is None:
-        debug = False
-    else:
-        debug = True
+    debug = False
     tprint(f"debug mode {debug}")
 
     tprint("loading data")
@@ -764,9 +757,7 @@ if __name__ == "__main__":
         train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
     tprint("TRAIN LightGBM")
     predictors = [
-        x
-        for x in train_df.columns
-        if x not in ["ID", "y", "base_year", "te_pref", "te_pref_city", "te_pref_city_district"]
+        x for x in train_df.columns if x not in ["ID", "y", "te_pref", "te_pref_city", "te_pref_city_district"]
     ]
     if debug:
         n_splits = 2
