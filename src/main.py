@@ -24,7 +24,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import xgboost as xgb
-from catboost import CatBoost, Pool
 from jeraconv import jeraconv
 from scipy.optimize import minimize
 from sklearn.metrics import mean_absolute_error
