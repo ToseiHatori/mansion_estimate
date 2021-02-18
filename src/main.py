@@ -709,38 +709,6 @@ class XGBTrainer(GroupKfoldTrainer):
         return model.predict(dtest, ntree_limit=model.best_ntree_limit)
 
 
-class CBTTrainer(GroupKfoldTrainer):
-    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
-        self.params = params
-        self.categorical_cols = categorical_cols
-        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
-
-    def _get_importance(self, model, dtrain):
-        imp = model.get_feature_importance(dtrain, type="FeatureImportance")
-        importance = pd.DataFrame({"features": self.predictors, "importance": imp})
-        return importance
-
-    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
-        set_seed(loop_seed)
-        self.params["random_seed"] = loop_seed
-        tprint(f"CBT params: {self.params}")
-
-        dtrain = Pool(X_train, label=Y_train, cat_features=self.categorical_cols, feature_names=self.predictors)
-        dvalid = Pool(X_valid, label=Y_valid, cat_features=self.categorical_cols, feature_names=self.predictors)
-        model = CatBoost(self.params)
-        model.fit(dtrain, eval_set=dvalid, use_best_model=True, plot=False)
-        ret = {}
-        ret["model"] = model
-        ret["importance"] = self._get_importance(model, dtrain)
-        tprint(f'importance: {ret["importance"]}')
-        return ret
-
-    def _predict(self, model, X):
-        dtest = Pool(X[self.predictors], cat_features=self.categorical_cols, feature_names=self.predictors)
-        pred = model.predict(dtest, prediction_type="RawFormulaVal")
-        return pred
-
-
 def get_score(weights, train_idx, oofs, labels):
     blend = np.zeros_like(oofs[0][train_idx])
 
@@ -865,35 +833,9 @@ if __name__ == "__main__":
     )
     xgb_trainer = fit_trainer(xgb_trainer)
 
-    tprint("TRAIN CatBoost")
-    params = {
-        "loss_function": "MAE",
-        "num_boost_round": 10000,
-        "early_stopping_rounds": 100,
-        "verbose_eval": 100,
-        "depth": 1,
-        "nan_mode": "Min",
-        "bootstrap_type": "Bernoulli",
-        "task_type": "CPU" if debug else "GPU",
-        "learning_rate": 0.1,
-    }
-    cbt_trainer = CBTTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=1,
-        params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
-    )
-    cbt_trainer = fit_trainer(cbt_trainer)
-
     # blending
-    stage2_oofs = [lgb_trainer.oof, mlp_trainer.oof, xgb_trainer.oof, cbt_trainer.oof]
-    stage2_preds = [lgb_trainer.pred, mlp_trainer.pred, xgb_trainer.pred, cbt_trainer.pred]
+    stage2_oofs = [lgb_trainer.oof, mlp_trainer.oof, xgb_trainer.oof]
+    stage2_preds = [lgb_trainer.pred, mlp_trainer.pred, xgb_trainer.pred]
     best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
     best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
     tprint("post processed optimized weight", best_weights)
