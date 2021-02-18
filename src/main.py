@@ -871,6 +871,7 @@ if __name__ == "__main__":
         "num_boost_round": 10000,
         "early_stopping_rounds": 100,
         "verbose_eval": 100,
+        "depth": 1,
         "nan_mode": "Min",
         "bootstrap_type": "Bernoulli",
         "task_type": "CPU" if debug else "GPU",
@@ -884,7 +885,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=n_rsb,
+        n_rsb=1,
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
