@@ -206,8 +206,9 @@ def preprocess(train_df, test_df):
         df["remodeling"] = df["改装"]
 
         # 取引時期など
-        df["base_year"] = [float(x[0:4]) for x in df["取引時点"]]
-        df["base_quarter"] = [float(x[6:7]) for x in df["取引時点"]]
+        df["base_year"] = [int(x[0:4]) for x in df["取引時点"]]
+        df["base_quarter"] = [int(x[6:7]) for x in df["取引時点"]]
+        df["base_year_quater"] = [int(str(x) + str(y)) for x, y in zip(df["base_year"], df["base_quarter"])]
         df["passed_year"] = df["base_year"] - df["year_of_construction"]
 
         # 取引の事情等
@@ -218,9 +219,28 @@ def preprocess(train_df, test_df):
         df["reason_defects"] = [int("瑕疵有りの可能性" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_related_parties"] = [int("関係者間取引" in x) for x in df["取引の事情等"].fillna("")]
 
-        # 容積率 x 面積
-        df["floor_area_ratio_x_area"] = df["floor_area_ratio"] * df["area"]
-
+        # いろいろな組み合わせ
+        inter_cols = [
+            "year_of_construction",
+            "area",
+            "passed_year",
+            "time_to_station",
+            "base_year",
+            "base_quarter",
+            "base_year_quater",
+            "floor_area_ratio",
+            "plan_num",
+            "building_coverage_ratio",
+        ]
+        for i, col_1 in enumerate(inter_cols):
+            for j, col_2 in enumerate(inter_cols):
+                if i != j:
+                    df[f"{col_1}_p_{col_2}"] = df[col_1] + df[col_2]
+                    df[f"{col_1}_m_{col_2}"] = df[col_1] - df[col_2]
+                    if (df[col_2] == 0).sum() == 0:
+                        df[f"{col_1}_d_{col_2}"] = df[col_1] / df[col_2]
+                if i < j:
+                    df[f"{col_1}_x_{col_2}"] = df[col_1] * df[col_2]
     # null数
     original_columns = [
         "都道府県名",
@@ -279,8 +299,6 @@ def preprocess(train_df, test_df):
     train_df[category_columns] = train_df[category_columns].astype(int)
     test_df[category_columns] = test_df[category_columns].astype(int)
 
-    tprint(f"train head : {train_df.head()}")
-    tprint(f"test head : {test_df.head()}")
     return train_df, test_df
 
 
