@@ -128,6 +128,19 @@ def get_data(debug):
     return train_df, test_df, sample_submission
 
 
+def get_inter_features(df, inter_cols):
+    for i, col_1 in enumerate(inter_cols):
+        for j, col_2 in enumerate(inter_cols):
+            if i != j:
+                df[f"{col_1}_p_{col_2}"] = df[col_1] + df[col_2]
+                df[f"{col_1}_m_{col_2}"] = df[col_1] - df[col_2]
+                if (df[col_2] == 0).sum() == 0:
+                    df[f"{col_1}_d_{col_2}"] = df[col_1] / df[col_2]
+            if i < j:
+                df[f"{col_1}_x_{col_2}"] = df[col_1] * df[col_2]
+    return df
+
+
 @Cache("./cache")
 def preprocess(train_df, test_df):
     # 目的変数rename
@@ -140,7 +153,7 @@ def preprocess(train_df, test_df):
         else:
             return None
 
-    for df in [train_df, test_df]:
+    for i, df in enumerate([train_df, test_df]):
         # 都道府県+市区町村、都道府県+市区町村+地区名を取得
         df["pref"] = df["都道府県名"]
         df["pref_city"] = df["都道府県名"] + df["市区町村名"]
@@ -218,7 +231,7 @@ def preprocess(train_df, test_df):
         df["reason_defects"] = [int("瑕疵有りの可能性" in x) for x in df["取引の事情等"].fillna("")]
         df["reason_related_parties"] = [int("関係者間取引" in x) for x in df["取引の事情等"].fillna("")]
 
-        # いろいろな組み合わせ
+        # いろいろな組み合わせ変数を作る
         inter_cols = [
             "year_of_construction",
             "area",
@@ -231,15 +244,16 @@ def preprocess(train_df, test_df):
             "plan_num",
             "building_coverage_ratio",
         ]
-        for i, col_1 in enumerate(inter_cols):
-            for j, col_2 in enumerate(inter_cols):
-                if i != j:
-                    df[f"{col_1}_p_{col_2}"] = df[col_1] + df[col_2]
-                    df[f"{col_1}_m_{col_2}"] = df[col_1] - df[col_2]
-                    if (df[col_2] == 0).sum() == 0:
-                        df[f"{col_1}_d_{col_2}"] = df[col_1] / df[col_2]
-                if i < j:
-                    df[f"{col_1}_x_{col_2}"] = df[col_1] * df[col_2]
+        inter_cols_scaled = [x + "_scaled" for x in inter_cols]
+        # min_max_scaling(足し算変数などにスケールを合わせたい)
+        if i == 0:
+            transformer = MinMaxScaler()
+            df[inter_cols_scaled] = transformer.fit_transform(df[inter_cols])
+        else:
+            df[inter_cols_scaled] = transformer.transform(df[inter_cols])
+        df = get_inter_features(df, inter_cols)
+        df = get_inter_features(df, inter_cols_scaled)
+
     # null数
     original_columns = [
         "都道府県名",
@@ -385,7 +399,9 @@ class GroupKfoldTrainer(object):
         # validation score of fold mean
         cv_score = np.mean(self.validation_score, axis=0)
         cv_std = np.std(self.validation_score, axis=0)
-        tprint(f"TOTAL CV SCORE is : {cv_score:.6f} +- {cv_std:.4f}")
+        tprint(f"TOTAL CV  SCORE is : {cv_score:.6f} +- {cv_std:.4f}")
+        oof_score = self.loss_(self.oof, self.X.loc[:, self.target_col])
+        tprint(f"TOTAL OOF SCORE is : {oof_score:.6f}")
         tprint("----終わり----\n")
 
 
@@ -780,6 +796,29 @@ if __name__ == "__main__":
     else:
         n_splits = 6
         n_rsb = 5
+    tprint("TRAIN LightGBM")
+    params = {
+        "objective": "mae",
+        "boosting_type": "gbdt",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "device": "cpu",
+        "learning_rate": 0.1,
+        "verbosity": -1,
+    }
+    lgb_trainer = LGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params=params,
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
+    )
+    lgb_trainer = fit_trainer(lgb_trainer)
 
     tprint("TRAIN XGBoost")
     params = {
@@ -818,30 +857,6 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     mlp_trainer = fit_trainer(mlp_trainer)
-
-    tprint("TRAIN LightGBM")
-    params = {
-        "objective": "mae",
-        "boosting_type": "gbdt",
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "device": "cpu",
-        "learning_rate": 0.1,
-        "verbosity": -1,
-    }
-    lgb_trainer = LGBTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
-    )
-    lgb_trainer = fit_trainer(lgb_trainer)
 
     # blending
     stage2_oofs = [lgb_trainer.oof, mlp_trainer.oof, xgb_trainer.oof]
