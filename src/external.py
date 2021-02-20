@@ -4,6 +4,7 @@ import glob
 import requests
 import tqdm
 import time
+import os
 from bs4 import BeautifulSoup
 
 
@@ -27,21 +28,23 @@ if __name__ == "__main__":
     df["pref_city_district"] = df["都道府県名"] + df["市区町村名"] + df["地区名"]
     del train_df, test_df, sample_submission
     districts = df["pref_city_district"].unique()
-    lats = np.zeros(len(districts))
-    lons = np.zeros(len(districts))
+
+    csv_path = "./data/processed/district_latlon.csv"
+    if os.path.exists(csv_path):
+        district_df = pd.read_csv(csv_path)
+    else:
+        lats = np.zeros(len(districts))
+        lons = np.zeros(len(districts))
+        district_df = pd.DataFrame([districts, lats, lons]).T
+        district_df.columns = ["pref_city_district", "lat", "lon"]
+        district_df.to_csv(csv_path, index=False)
     err_districts = []
-    for i, district in tqdm.tqdm(enumerate(districts)):
-        try:
+    for i, row in tqdm.tqdm(enumerate(district_df.iterrows())):
+        if (row[1].lat == 0) | (row[1].lon == 0):
+            district = row[1].pref_city_district
             r = requests.get(f"https://www.geocoding.jp/api/?q={district}")
             soup = BeautifulSoup(r.text, "html.parser")
-            lats[i] = float(soup.lat.contents[0])
-            lons[i] = float(soup.lng.contents[0])
-
-            district_df = pd.DataFrame([districts, lats, lons]).T
-            district_df.columns = ["pref_city_district", "lat", "lon"]
-            district_df.to_csv("./data/processed/district_latlon.csv", index=False)
-        except:
-            print(district)
-            err_districts.append(district)
-
-        time.sleep(8)
+            district_df.iloc[i, 1] = float(soup.lat.contents[0])
+            district_df.iloc[i, 2] = float(soup.lng.contents[0])
+            district_df.to_csv(csv_path, index=False)
+            time.sleep(10)
