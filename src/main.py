@@ -447,6 +447,9 @@ class LGBTrainer(GroupKfoldTrainer):
     def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
         self.categorical_cols = categorical_cols
         self.params = params
+        if params["objective"] == "xentropy":
+            self.y_max = X[target_col].max()
+            self.y_min = X[target_col].min()
         super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
 
     def _get_importance(self, model, importance_type="gain"):
@@ -460,6 +463,9 @@ class LGBTrainer(GroupKfoldTrainer):
         set_seed(loop_seed)
         self.params["random_seed"] = loop_seed
         tprint(f"LGBM params: {self.params}")
+        if params["objective"] == "xentropy":
+            Y_train = (Y_train - self.y_min) / (self.y_max - self.y_min)
+            Y_valid = (Y_valid - self.y_min) / (self.y_max - self.y_min)
 
         dtrain = lgb.Dataset(
             X_train, label=Y_train, feature_name=self.predictors, categorical_feature=self.categorical_cols
@@ -482,7 +488,10 @@ class LGBTrainer(GroupKfoldTrainer):
         return ret
 
     def _predict(self, model, X):
-        return model.predict(X[self.predictors])
+        pred = model.predict(X[self.predictors])
+        if params["objective"] == "xentropy":
+            pred = (pred * (self.y_max - self.y_min)) + self.y_min
+        return pred
 
 
 class MEDataset(Dataset):
@@ -858,6 +867,30 @@ if __name__ == "__main__":
     )
     lgb_trainer = fit_trainer(lgb_trainer)
 
+    tprint("TRAIN LightGBM xent")
+    params = {
+        "objective": "xentropy",
+        "boosting_type": "gbdt",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "device": "cpu",
+        "learning_rate": 0.1,
+        "verbosity": -1,
+    }
+    xent_trainer = LGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params=params,
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
+    )
+    xent_trainer = fit_trainer(xent_trainer)
+    """
     tprint("TRAIN XGBoost")
     params = {
         "objective": "reg:squarederror",
@@ -895,10 +928,11 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     mlp_trainer = fit_trainer(mlp_trainer)
+    """
 
     # blending
-    stage2_oofs = [lgb_trainer.oof, mlp_trainer.oof, xgb_trainer.oof]
-    stage2_preds = [lgb_trainer.pred, mlp_trainer.pred, xgb_trainer.pred]
+    stage2_oofs = [lgb_trainer.oof, xent_trainer.oof]
+    stage2_preds = [lgb_trainer.pred, xent_trainer.pred]
     best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
     best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
     tprint("post processed optimized weight", best_weights)
