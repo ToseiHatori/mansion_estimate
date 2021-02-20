@@ -254,6 +254,10 @@ def preprocess(train_df, test_df):
         # 取引時期など
         df["base_year"] = [int(x[0:4]) for x in df["取引時点"]]
         df["base_quarter"] = [int(x[6:7]) for x in df["取引時点"]]
+        # sin, cos
+        x = 2 * np.pi * (df['base_quarter'] / max(df['base_quarter']))
+        df["base_quarter_sin"] = np.sin(x)
+        df["base_quarter_cos"] = np.cos(x)
         df["base_year_quater"] = [int(str(x) + str(y)) for x, y in zip(df["base_year"], df["base_quarter"])]
         df["passed_year"] = df["base_year"] - df["year_of_construction"]
 

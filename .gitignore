@@ -11,6 +11,7 @@
 *.tfevents
 catboost_info
 .vscode
+data/external
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
