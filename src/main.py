@@ -842,7 +842,7 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 5
+        n_rsb = 2
     tprint("TRAIN LightGBM")
     params = {
         "objective": "mae",
