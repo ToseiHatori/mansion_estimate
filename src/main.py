@@ -166,12 +166,12 @@ def get_inter_features(df, inter_cols):
     for i, col_1 in enumerate(inter_cols):
         for j, col_2 in enumerate(inter_cols):
             if i != j:
-                df[f"{col_1}_p_{col_2}"] = df[col_1] + df[col_2]
                 df[f"{col_1}_m_{col_2}"] = df[col_1] - df[col_2]
                 if (df[col_2] == 0).sum() == 0:
                     df[f"{col_1}_d_{col_2}"] = df[col_1] / df[col_2]
             if i < j:
                 df[f"{col_1}_x_{col_2}"] = df[col_1] * df[col_2]
+                df[f"{col_1}_p_{col_2}"] = df[col_1] + df[col_2]
     return df
 
 
