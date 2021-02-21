@@ -919,9 +919,15 @@ if __name__ == "__main__":
     xgb_trainer = fit_trainer(xgb_trainer)
 
     tprint("TRAIN NN")
+    predictors_nn = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
+    predictors_nn = [x for x in predictors_nn if 'scaled' not in x]
+    predictors_nn = [x for x in predictors_nn if re.search('_p_', x) is None]
+    predictors_nn = [x for x in predictors_nn if re.search('_m_', x) is None]
+    predictors_nn = [x for x in predictors_nn if re.search('_d_', x) is None]
+    predictors_nn = [x for x in predictors_nn if re.search('_x_', x) is None]
     mlp_trainer = MLPTrainer(
         state_path="./models",
-        predictors=predictors,
+        predictors=predictors_nn,
         target_col="y",
         X=train_df,
         groups=train_df["base_year"],
