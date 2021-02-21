@@ -412,8 +412,10 @@ class GroupKfoldTrainer(object):
                 # 学習
                 ret = self._fit(X_train, Y_train, X_valid, Y_valid, loop_seed=rsb_idx)
                 # save models
+                """
                 if (fold_cnt == 1) & (rsb_idx == 0):
                     self.folds.append(ret)
+                """
                 model = ret["model"]
 
                 # oof, predに対して予測
@@ -479,12 +481,13 @@ class LGBTrainer(GroupKfoldTrainer):
             valid_sets=[dtrain, dvalid],
             num_boost_round=50000,
             early_stopping_rounds=100,
-            verbose_eval=100,
+            verbose_eval=1000,
         )
         ret = {}
         ret["model"] = model
         ret["importance"] = self._get_importance(model, importance_type="gain")
-        tprint(f'importance: {ret["importance"]}')
+        tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
+        tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
         return ret
 
     def _predict(self, model, X):
@@ -842,7 +845,7 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 2
+        n_rsb = 1
     tprint("TRAIN LightGBM")
     params = {
         "objective": "mae",
@@ -890,7 +893,7 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
     xent_trainer = fit_trainer(xent_trainer)
-    """
+
     tprint("TRAIN XGBoost")
     params = {
         "objective": "reg:squarederror",
@@ -928,17 +931,18 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     mlp_trainer = fit_trainer(mlp_trainer)
-    """
 
     # blending
-    stage2_oofs = [lgb_trainer.oof, xent_trainer.oof]
-    stage2_preds = [lgb_trainer.pred, xent_trainer.pred]
+    stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, mlp_trainer.oof]
+    stage2_preds = [lgb_trainer.pred, xent_trainer.pred, xgb_trainer.pred, mlp_trainer.pred]
     best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
     best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
     tprint("post processed optimized weight", best_weights)
     oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
     blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
     tprint("final oof score", mean_absolute_error(train_df["y"].values, oof_preds))
+    with open("./models/final_oof_and_pred.pickle", "wb") as f:
+        pickle.dump([oof_preds, blend_preds], f)
 
     # submit
     sample_submission["取引価格（総額）_log"] = blend_preds
