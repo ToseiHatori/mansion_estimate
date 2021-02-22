@@ -846,7 +846,7 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_rsb = 1
+        n_rsb = 5
     tprint("TRAIN LightGBM")
     params = {
         "objective": "mae",
@@ -920,11 +920,11 @@ if __name__ == "__main__":
 
     tprint("TRAIN NN")
     predictors_nn = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
-    predictors_nn = [x for x in predictors_nn if 'scaled' not in x]
-    predictors_nn = [x for x in predictors_nn if re.search('_p_', x) is None]
-    predictors_nn = [x for x in predictors_nn if re.search('_m_', x) is None]
-    predictors_nn = [x for x in predictors_nn if re.search('_d_', x) is None]
-    predictors_nn = [x for x in predictors_nn if re.search('_x_', x) is None]
+    predictors_nn = [x for x in predictors_nn if "scaled" not in x]
+    predictors_nn = [x for x in predictors_nn if re.search("_p_", x) is None]
+    predictors_nn = [x for x in predictors_nn if re.search("_m_", x) is None]
+    predictors_nn = [x for x in predictors_nn if re.search("_d_", x) is None]
+    predictors_nn = [x for x in predictors_nn if re.search("_x_", x) is None]
     mlp_trainer = MLPTrainer(
         state_path="./models",
         predictors=predictors_nn,
