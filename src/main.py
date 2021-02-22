@@ -179,6 +179,7 @@ def get_inter_features(df, inter_cols):
 def preprocess(train_df, test_df):
     # 目的変数rename
     train_df = train_df.rename(columns={"取引価格（総額）_log": "y"})
+    train_df = train_df[train_df["y"] < 5].reset_index(drop=True)
 
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
