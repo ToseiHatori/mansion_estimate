@@ -196,7 +196,6 @@ def preprocess(train_df, test_df):
 
         # 駅関係を取得
         df["station"] = df["最寄駅：名称"]
-        time_to_station_dict = {"1H30?2H": "105", "1H?1H30": "75", "2H?": "120", "30分?60分": "45"}
         df["最寄駅：距離（分）"] = [x if x != "1H30?2H" else "105" for x in df["最寄駅：距離（分）"]]
         df["最寄駅：距離（分）"] = [x if x != "1H?1H30" else "75" for x in df["最寄駅：距離（分）"]]
         df["最寄駅：距離（分）"] = [x if x != "2H?" else "120" for x in df["最寄駅：距離（分）"]]
@@ -255,6 +254,7 @@ def preprocess(train_df, test_df):
         # 取引時期など
         df["base_year"] = [int(x[0:4]) for x in df["取引時点"]]
         df["base_quarter"] = [int(x[6:7]) for x in df["取引時点"]]
+        df["timing_code"] = [y + (4 * (x - 2005)) for x, y in zip(df["base_year"], df["base_quarter"])]
         # sin, cos
         x = 2 * np.pi * (df["base_quarter"] / max(df["base_quarter"]))
         df["base_quarter_sin"] = np.sin(x)
@@ -292,6 +292,7 @@ def preprocess(train_df, test_df):
             df[inter_cols_scaled] = transformer.transform(df[inter_cols])
         df = get_inter_features(df, inter_cols)
         df = get_inter_features(df, inter_cols_scaled)
+        df = df.drop(inter_cols_scaled, axis=1)
 
     # null数
     original_columns = [
@@ -350,6 +351,9 @@ def preprocess(train_df, test_df):
         test_df.loc[idx, cat] = 0
     train_df[category_columns] = train_df[category_columns].astype(int)
     test_df[category_columns] = test_df[category_columns].astype(int)
+
+    # EXP: 12年までは変な感じなので切ってみる
+    train_df = train_df[train_df['base_year'] > 2012].reset_index(drop=True)
 
     return train_df, test_df
 
