@@ -292,7 +292,6 @@ def preprocess(train_df, test_df):
             df[inter_cols_scaled] = transformer.transform(df[inter_cols])
         df = get_inter_features(df, inter_cols)
         df = get_inter_features(df, inter_cols_scaled)
-        df = df.drop(inter_cols_scaled, axis=1)
 
     # null数
     original_columns = [
@@ -320,6 +319,8 @@ def preprocess(train_df, test_df):
     # 不要なカラム削除
     train_df = train_df.drop(original_columns, axis=1)
     test_df = test_df.drop(original_columns, axis=1)
+    train_df = train_df.drop(inter_cols_scaled, axis=1)
+    test_df = test_df.drop(inter_cols_scaled, axis=1)
 
     # target encoding
     for col in ["pref", "pref_city", "pref_city_district"]:
@@ -353,7 +354,7 @@ def preprocess(train_df, test_df):
     test_df[category_columns] = test_df[category_columns].astype(int)
 
     # EXP: 12年までは変な感じなので切ってみる
-    train_df = train_df[train_df['base_year'] > 2012].reset_index(drop=True)
+    train_df = train_df[train_df["base_year"] > 2012].reset_index(drop=True)
 
     return train_df, test_df
 
