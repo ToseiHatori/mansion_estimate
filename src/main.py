@@ -33,6 +33,8 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
+from pytorch_tabnet.tab_model import TabNetRegressor
+
 
 gc.enable()
 pd.options.display.max_columns = None
@@ -792,6 +794,92 @@ class XGBTrainer(GroupKfoldTrainer):
         return model.predict(dtest, ntree_limit=model.best_ntree_limit)
 
 
+class TabNetTrainer(GroupKfoldTrainer):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+        self.categorical_cols = categorical_cols
+        if params is None:
+            self.params = {}
+        else:
+            self.params = params
+        self.X, self.test = self.preprocess(X, test)
+
+    def preprocess(self, train_df: pd.DataFrame, test_df: pd.DataFrame):
+        # -1埋め
+        train_df[self.predictors] = train_df[self.predictors].fillna(-1)
+        test_df[self.predictors] = test_df[self.predictors].fillna(-1)
+        """
+        tprint("scaling...")
+        transformer = MinMaxScaler()
+        # transformer = RobustScaler()
+        train_df[self.predictors] = transformer.fit_transform(train_df[self.predictors])
+        test_df[self.predictors] = transformer.transform(test_df[self.predictors])
+        """
+        gc.collect()
+        return train_df, test_df
+
+    def _get_default_params(self):
+        return dict(
+            loss_fn="mae",
+            max_epoch=100,
+            batch_size=1024,
+            initialize_params=dict(
+                n_d=32,
+                n_a=32,
+                n_steps=1,
+                gamma=1.3,
+                lambda_sparse=0,
+                optimizer_fn=torch.optim.Adam,
+                optimizer_params=dict(lr=2e-2, weight_decay=1e-5),
+                mask_type="entmax",
+                scheduler_params=dict(mode="min", patience=5, min_lr=1e-5, factor=0.9),
+                scheduler_fn=ReduceLROnPlateau,
+                seed=42,
+                verbose=10,
+            ),
+        )
+
+    def _get_importance(self, model, importance_type="gain"):
+        return
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        set_seed(loop_seed)
+        _params = self._get_default_params()
+        _params.update(self.params)
+        _params["initialize_params"]["seed"] = loop_seed
+        tprint(f"TabNet params: {_params}")
+        # pd -> array
+        X_train = X_train.fillna(-1).values
+        X_valid = X_valid.fillna(-1).values
+        Y_train = Y_train.values.reshape(-1, 1)
+        Y_valid = Y_valid.values.reshape(-1, 1)
+
+        model = TabNetRegressor(**_params["initialize_params"])
+        ret = {}
+        model.fit(
+            X_train=X_train,
+            y_train=Y_train,
+            eval_set=[(X_valid, Y_valid)],
+            eval_name=["val"],
+            eval_metric=["mae"],
+            max_epochs=_params["max_epoch"],
+            patience=20,
+            batch_size=_params["batch_size"],
+            virtual_batch_size=32,
+            num_workers=0,
+            drop_last=False,
+        )
+        ret["model"] = model
+        # ret["importance"] = self._get_importance(model, importance_type="gain")
+        # tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
+        # tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
+        return ret
+
+    def _predict(self, model, X):
+        pred = model.predict(X[self.predictors].fillna(-1).values).reshape(-1)
+        return pred
+
+
 def get_score(weights, train_idx, oofs, labels):
     blend = np.zeros_like(oofs[0][train_idx])
 
@@ -829,7 +917,7 @@ def fit_trainer(trainer_instance):
 
 
 if __name__ == "__main__":
-    debug = False
+    debug = True
     tprint(f"debug mode {debug}")
 
     tprint("loading data")
@@ -848,6 +936,21 @@ if __name__ == "__main__":
     else:
         n_splits = 6
         n_rsb = 1
+    tprint("TRAIN TabNet")
+    tab_trainer = TabNetTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params={},
+        categorical_cols=[],
+    )
+    tab_trainer = fit_trainer(tab_trainer)
+
     tprint("TRAIN LightGBM")
     params = {
         "objective": "mae",
