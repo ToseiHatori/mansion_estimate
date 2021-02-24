@@ -808,13 +808,13 @@ class TabNetTrainer(GroupKfoldTrainer):
         # -1埋め
         train_df[self.predictors] = train_df[self.predictors].fillna(-1)
         test_df[self.predictors] = test_df[self.predictors].fillna(-1)
-        """
+
         tprint("scaling...")
         transformer = MinMaxScaler()
         # transformer = RobustScaler()
         train_df[self.predictors] = transformer.fit_transform(train_df[self.predictors])
         test_df[self.predictors] = transformer.transform(test_df[self.predictors])
-        """
+
         gc.collect()
         return train_df, test_df
 
@@ -824,11 +824,13 @@ class TabNetTrainer(GroupKfoldTrainer):
             max_epoch=100,
             batch_size=1024,
             initialize_params=dict(
-                n_d=32,
-                n_a=32,
-                n_steps=1,
+                n_d=8,
+                n_a=8,
+                n_steps=3,
                 gamma=1.3,
-                lambda_sparse=0,
+                cat_idxs=[],
+                cat_dims=[],
+                cat_emb_dim=[],
                 optimizer_fn=torch.optim.Adam,
                 optimizer_params=dict(lr=2e-2, weight_decay=1e-5),
                 mask_type="entmax",
@@ -928,7 +930,7 @@ if __name__ == "__main__":
     train_df = reduce_mem_usage(train_df)
     test_df = reduce_mem_usage(test_df)
     if debug:
-        train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
+        train_df = train_df.sample(10000, random_state=100).reset_index(drop=True)
     predictors = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
     if debug:
         n_splits = 2
