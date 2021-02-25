@@ -353,9 +353,6 @@ def preprocess(train_df, test_df):
     train_df[category_columns] = train_df[category_columns].astype(int)
     test_df[category_columns] = test_df[category_columns].astype(int)
 
-    # EXP: 12年までは変な感じなので切ってみる
-    train_df = train_df[train_df["base_year"] > 2012].reset_index(drop=True)
-
     return train_df, test_df
 
 
