@@ -798,6 +798,8 @@ class TabNetTrainer(GroupKfoldTrainer):
     def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
         super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
         self.categorical_cols = categorical_cols
+        self.categorical_idx = [i for i, x in enumerate(predictors) if x in self.categorical_cols]
+        self.numeric_cols = [x for x in predictors if x not in categorical_cols]
         if params is None:
             self.params = {}
         else:
@@ -806,14 +808,14 @@ class TabNetTrainer(GroupKfoldTrainer):
 
     def preprocess(self, train_df: pd.DataFrame, test_df: pd.DataFrame):
         # -1埋め
-        train_df[self.predictors] = train_df[self.predictors].fillna(-1)
-        test_df[self.predictors] = test_df[self.predictors].fillna(-1)
+        train_df[self.numeric_cols] = train_df[self.numeric_cols].fillna(-1)
+        test_df[self.numeric_cols] = test_df[self.numeric_cols].fillna(-1)
 
         tprint("scaling...")
         transformer = MinMaxScaler()
         # transformer = RobustScaler()
-        train_df[self.predictors] = transformer.fit_transform(train_df[self.predictors])
-        test_df[self.predictors] = transformer.transform(test_df[self.predictors])
+        train_df[self.numeric_cols] = transformer.fit_transform(train_df[self.numeric_cols])
+        test_df[self.numeric_cols] = transformer.transform(test_df[self.numeric_cols])
 
         gc.collect()
         return train_df, test_df
@@ -824,13 +826,13 @@ class TabNetTrainer(GroupKfoldTrainer):
             max_epoch=100,
             batch_size=1024,
             initialize_params=dict(
-                n_d=8,
-                n_a=8,
+                n_d=16,
+                n_a=16,
                 n_steps=3,
                 gamma=1.3,
-                cat_idxs=[],
-                cat_dims=[],
-                cat_emb_dim=[],
+                cat_idxs=self.categorical_idx,
+                cat_dims=[48, 619, 15419, 3833],
+                cat_emb_dim=[5, 10, 100, 50],
                 optimizer_fn=torch.optim.Adam,
                 optimizer_params=dict(lr=2e-2, weight_decay=1e-5),
                 mask_type="entmax",
@@ -851,8 +853,8 @@ class TabNetTrainer(GroupKfoldTrainer):
         _params["initialize_params"]["seed"] = loop_seed
         tprint(f"TabNet params: {_params}")
         # pd -> array
-        X_train = X_train.fillna(-1).values
-        X_valid = X_valid.fillna(-1).values
+        X_train = X_train.values
+        X_valid = X_valid.values
         Y_train = Y_train.values.reshape(-1, 1)
         Y_valid = Y_valid.values.reshape(-1, 1)
 
@@ -878,7 +880,7 @@ class TabNetTrainer(GroupKfoldTrainer):
         return ret
 
     def _predict(self, model, X):
-        pred = model.predict(X[self.predictors].fillna(-1).values).reshape(-1)
+        pred = model.predict(X[self.predictors].values).reshape(-1)
         return pred
 
 
@@ -939,9 +941,15 @@ if __name__ == "__main__":
         n_splits = 6
         n_rsb = 1
     tprint("TRAIN TabNet")
+    predictors_nn = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
+    predictors_nn = [x for x in predictors_nn if "scaled" not in x]
+    predictors_nn = [x for x in predictors_nn if re.search("_p_", x) is None]
+    predictors_nn = [x for x in predictors_nn if re.search("_m_", x) is None]
+    predictors_nn = [x for x in predictors_nn if re.search("_d_", x) is None]
+    predictors_nn = [x for x in predictors_nn if re.search("_x_", x) is None]
     tab_trainer = TabNetTrainer(
         state_path="./models",
-        predictors=predictors,
+        predictors=predictors_nn,
         target_col="y",
         X=train_df,
         groups=train_df["base_year"],
@@ -949,7 +957,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params={},
-        categorical_cols=[],
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     tab_trainer = fit_trainer(tab_trainer)
 
@@ -1025,12 +1033,6 @@ if __name__ == "__main__":
     xgb_trainer = fit_trainer(xgb_trainer)
 
     tprint("TRAIN NN")
-    predictors_nn = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
-    predictors_nn = [x for x in predictors_nn if "scaled" not in x]
-    predictors_nn = [x for x in predictors_nn if re.search("_p_", x) is None]
-    predictors_nn = [x for x in predictors_nn if re.search("_m_", x) is None]
-    predictors_nn = [x for x in predictors_nn if re.search("_d_", x) is None]
-    predictors_nn = [x for x in predictors_nn if re.search("_x_", x) is None]
     mlp_trainer = MLPTrainer(
         state_path="./models",
         predictors=predictors_nn,
