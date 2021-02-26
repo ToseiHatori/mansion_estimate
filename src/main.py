@@ -33,8 +33,10 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
-from pytorch_tabnet.tab_model import TabNetRegressor
-
+try:
+    from pytorch_tabnet.tab_model import TabNetRegressor
+except:
+    print('import err')
 
 gc.enable()
 pd.options.display.max_columns = None
