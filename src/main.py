@@ -963,7 +963,44 @@ if __name__ == "__main__":
     )
     tab_trainer = fit_trainer(tab_trainer)
 
-    tprint("TRAIN LightGBM")
+    tprint("TRAIN XGBoost")
+    params = {
+        "objective": "reg:squarederror",
+        "eval_metric": "mae",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "eta": 0.1,
+        "tree_method": "hist" if debug else "gpu_hist",
+    }
+    xgb_trainer = XGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=1,
+        params=params,
+        categorical_cols=[],
+    )
+    xgb_trainer = fit_trainer(xgb_trainer)
+
+    tprint("TRAIN NN")
+    mlp_trainer = MLPTrainer(
+        state_path="./models",
+        predictors=predictors_nn,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=1,
+        params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+    )
+    mlp_trainer = fit_trainer(mlp_trainer)
+       tprint("TRAIN LightGBM")
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
@@ -1010,44 +1047,6 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
     xent_trainer = fit_trainer(xent_trainer)
-
-    tprint("TRAIN XGBoost")
-    params = {
-        "objective": "reg:squarederror",
-        "eval_metric": "mae",
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "eta": 0.1,
-        "tree_method": "hist" if debug else "gpu_hist",
-    }
-    xgb_trainer = XGBTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=1,
-        params=params,
-        categorical_cols=[],
-    )
-    xgb_trainer = fit_trainer(xgb_trainer)
-
-    tprint("TRAIN NN")
-    mlp_trainer = MLPTrainer(
-        state_path="./models",
-        predictors=predictors_nn,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=1,
-        params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
-        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-    )
-    mlp_trainer = fit_trainer(mlp_trainer)
 
     # blending
     stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, mlp_trainer.oof]
