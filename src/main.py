@@ -35,11 +35,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
-
-try:
-    from pytorch_tabnet.tab_model import TabNetRegressor
-except:
-    print("import err")
+from pytorch_tabnet.tab_model import TabNetRegressor
 
 gc.enable()
 pd.options.display.max_columns = None
@@ -1038,9 +1034,9 @@ if __name__ == "__main__":
     tprint("reduce memory usage")
     train_df = reduce_mem_usage(train_df)
     test_df = reduce_mem_usage(test_df)
-    if ~debug:
-        feather.write_dataframe(train_df, './data/processed/train_df.feather')
-        feather.write_dataframe(test_df, './data/processed/test_df.feather')
+    if not debug:
+        feather.write_dataframe(train_df, "./data/processed/train_df.feather")
+        feather.write_dataframe(test_df, "./data/processed/test_df.feather")
     if debug:
         train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
     predictors = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]

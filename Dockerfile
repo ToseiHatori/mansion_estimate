@@ -4,4 +4,5 @@ FROM gcr.io/kaggle-images/python:v94
 # ライブラリの追加インストール
 # jeraconvだけは必要
 RUN pip install -U pip && \
-    pip install jeraconv
+    pip install jeraconv && \
+    pip install pytorch-tabnet
