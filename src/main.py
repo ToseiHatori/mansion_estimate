@@ -1176,8 +1176,8 @@ if __name__ == "__main__":
         groups=oof_df["base_year"],
         test=pred_df,
         n_splits=n_splits,
-        n_rsb=1,
-        n_trials=10,
+        n_rsb=n_rsb,
+        n_trials=100,
     )
     bridge_trainer = fit_trainer(bridge_trainer)
 
@@ -1190,8 +1190,8 @@ if __name__ == "__main__":
         groups=oof_df["base_year"],
         test=pred_df,
         n_splits=n_splits,
-        n_rsb=1,
-        n_trials=10,
+        n_rsb=n_rsb,
+        n_trials=100,
     )
     ridge_trainer = fit_trainer(ridge_trainer)
 
