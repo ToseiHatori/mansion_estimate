@@ -1024,7 +1024,7 @@ def get_oof_pred_from_dict(first_models: Dict, base_year: pd.Series, y: pd.Serie
 
 
 if __name__ == "__main__":
-    debug = True
+    debug = False
     tprint(f"debug mode {debug}")
 
     tprint("loading data")
