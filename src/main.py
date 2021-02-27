@@ -33,10 +33,11 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
+
 try:
     from pytorch_tabnet.tab_model import TabNetRegressor
 except:
-    print('import err')
+    print("import err")
 
 gc.enable()
 pd.options.display.max_columns = None
@@ -1032,8 +1033,8 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=n_splits,
-            n_rsb=n_rsb,
+            n_splits=5,
+            n_rsb=1,
             params={},
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
         )
@@ -1047,7 +1048,7 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=n_splits,
+            n_splits=5,
             n_rsb=1,
             params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
