@@ -34,6 +34,11 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 
+try:
+    from pytorch_tabnet.tab_model import TabNetRegressor
+except:
+    print("import err")
+
 gc.enable()
 pd.options.display.max_columns = None
 
@@ -794,6 +799,96 @@ class XGBTrainer(GroupKfoldTrainer):
         return model.predict(dtest, ntree_limit=model.best_ntree_limit)
 
 
+class TabNetTrainer(GroupKfoldTrainer):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+        self.categorical_cols = categorical_cols
+        self.categorical_idx = [i for i, x in enumerate(predictors) if x in self.categorical_cols]
+        self.numeric_cols = [x for x in predictors if x not in categorical_cols]
+        if params is None:
+            self.params = {}
+        else:
+            self.params = params
+        self.X, self.test = self.preprocess(X, test)
+
+    def preprocess(self, train_df: pd.DataFrame, test_df: pd.DataFrame):
+        # -1埋め
+        train_df[self.numeric_cols] = train_df[self.numeric_cols].fillna(-1)
+        test_df[self.numeric_cols] = test_df[self.numeric_cols].fillna(-1)
+
+        tprint("scaling...")
+        transformer = MinMaxScaler()
+        # transformer = RobustScaler()
+        train_df[self.numeric_cols] = transformer.fit_transform(train_df[self.numeric_cols])
+        test_df[self.numeric_cols] = transformer.transform(test_df[self.numeric_cols])
+
+        gc.collect()
+        return train_df, test_df
+
+    def _get_default_params(self):
+        return dict(
+            loss_fn="mae",
+            max_epoch=100,
+            batch_size=1024,
+            initialize_params=dict(
+                n_d=16,
+                n_a=16,
+                n_steps=3,
+                gamma=1.3,
+                cat_idxs=self.categorical_idx,
+                cat_dims=[48, 619, 15419, 3833],
+                cat_emb_dim=[5, 10, 100, 50],
+                optimizer_fn=torch.optim.Adam,
+                optimizer_params=dict(lr=1e-3, weight_decay=1e-5),
+                mask_type="entmax",
+                scheduler_params=dict(mode="min", patience=5, min_lr=1e-5, factor=0.9),
+                scheduler_fn=ReduceLROnPlateau,
+                seed=42,
+                verbose=10,
+            ),
+        )
+
+    def _get_importance(self, model, importance_type="gain"):
+        return
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        set_seed(loop_seed)
+        _params = self._get_default_params()
+        _params.update(self.params)
+        _params["initialize_params"]["seed"] = loop_seed
+        tprint(f"TabNet params: {_params}")
+        # pd -> array
+        X_train = X_train.values
+        X_valid = X_valid.values
+        Y_train = Y_train.values.reshape(-1, 1)
+        Y_valid = Y_valid.values.reshape(-1, 1)
+
+        model = TabNetRegressor(**_params["initialize_params"])
+        ret = {}
+        model.fit(
+            X_train=X_train,
+            y_train=Y_train,
+            eval_set=[(X_valid, Y_valid)],
+            eval_name=["val"],
+            eval_metric=["mae"],
+            max_epochs=_params["max_epoch"],
+            patience=20,
+            batch_size=_params["batch_size"],
+            virtual_batch_size=32,
+            num_workers=0,
+            drop_last=False,
+        )
+        ret["model"] = model
+        # ret["importance"] = self._get_importance(model, importance_type="gain")
+        # tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
+        # tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
+        return ret
+
+    def _predict(self, model, X):
+        pred = model.predict(X[self.predictors].values).reshape(-1)
+        return pred
+
+
 def get_score(weights, train_idx, oofs, labels):
     blend = np.zeros_like(oofs[0][train_idx])
 
@@ -842,7 +937,7 @@ if __name__ == "__main__":
     train_df = reduce_mem_usage(train_df)
     test_df = reduce_mem_usage(test_df)
     if debug:
-        train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
+        train_df = train_df.sample(10000, random_state=100).reset_index(drop=True)
     predictors = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
     if debug:
         n_splits = 2
@@ -850,97 +945,115 @@ if __name__ == "__main__":
     else:
         n_splits = 6
         n_rsb = 1
-    tprint("TRAIN LightGBM")
-    params = {
-        "objective": "mae",
-        "boosting_type": "gbdt",
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "device": "cpu",
-        "learning_rate": 0.1,
-        "verbosity": -1,
-    }
-    lgb_trainer = LGBTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
-    )
-    lgb_trainer = fit_trainer(lgb_trainer)
+    if True:
+        tprint("TRAIN LightGBM")
+        params = {
+            "objective": "mae",
+            "boosting_type": "gbdt",
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "device": "cpu",
+            "learning_rate": 0.1,
+            "verbosity": -1,
+        }
+        lgb_trainer = LGBTrainer(
+            state_path="./models",
+            predictors=predictors,
+            target_col="y",
+            X=train_df,
+            groups=train_df["base_year"],
+            test=test_df,
+            n_splits=n_splits,
+            n_rsb=n_rsb,
+            params=params,
+            categorical_cols=["pref", "pref_city", "pref_city_district"],
+        )
+        lgb_trainer = fit_trainer(lgb_trainer)
 
-    tprint("TRAIN LightGBM xent")
-    params = {
-        "objective": "xentropy",
-        "boosting_type": "gbdt",
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "device": "cpu",
-        "learning_rate": 0.1,
-        "verbosity": -1,
-    }
-    xent_trainer = LGBTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
-    )
-    xent_trainer = fit_trainer(xent_trainer)
+        tprint("TRAIN LightGBM xent")
+        params = {
+            "objective": "xentropy",
+            "boosting_type": "gbdt",
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "device": "cpu",
+            "learning_rate": 0.1,
+            "verbosity": -1,
+        }
+        xent_trainer = LGBTrainer(
+            state_path="./models",
+            predictors=predictors,
+            target_col="y",
+            X=train_df,
+            groups=train_df["base_year"],
+            test=test_df,
+            n_splits=n_splits,
+            n_rsb=n_rsb,
+            params=params,
+            categorical_cols=["pref", "pref_city", "pref_city_district"],
+        )
+        xent_trainer = fit_trainer(xent_trainer)
+    if True:
+        tprint("TRAIN XGBoost")
+        params = {
+            "objective": "reg:squarederror",
+            "eval_metric": "mae",
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+            "eta": 0.01,
+            "tree_method": "hist" if debug else "gpu_hist",
+        }
+        xgb_trainer = XGBTrainer(
+            state_path="./models",
+            predictors=predictors,
+            target_col="y",
+            X=train_df,
+            groups=train_df["base_year"],
+            test=test_df,
+            n_splits=n_splits,
+            n_rsb=1,
+            params=params,
+            categorical_cols=[],
+        )
+        xgb_trainer = fit_trainer(xgb_trainer)
 
-    tprint("TRAIN XGBoost")
-    params = {
-        "objective": "reg:squarederror",
-        "eval_metric": "mae",
-        "subsample": 0.8,
-        "colsample_bytree": 0.8,
-        "eta": 0.1,
-        "tree_method": "hist" if debug else "gpu_hist",
-    }
-    xgb_trainer = XGBTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=1,
-        params=params,
-        categorical_cols=[],
-    )
-    xgb_trainer = fit_trainer(xgb_trainer)
+        tprint("TRAIN TabNet")
+        predictors_nn = [
+            x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]
+        ]
+        predictors_nn = [x for x in predictors_nn if "scaled" not in x]
+        predictors_nn = [x for x in predictors_nn if re.search("_p_", x) is None]
+        predictors_nn = [x for x in predictors_nn if re.search("_m_", x) is None]
+        predictors_nn = [x for x in predictors_nn if re.search("_d_", x) is None]
+        predictors_nn = [x for x in predictors_nn if re.search("_x_", x) is None]
+        tab_trainer = TabNetTrainer(
+            state_path="./models",
+            predictors=predictors_nn,
+            target_col="y",
+            X=train_df,
+            groups=train_df["base_year"],
+            test=test_df,
+            n_splits=5,
+            n_rsb=1,
+            params={},
+            categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+        )
+        tab_trainer = fit_trainer(tab_trainer)
 
-    tprint("TRAIN NN")
-    predictors_nn = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
-    predictors_nn = [x for x in predictors_nn if "scaled" not in x]
-    predictors_nn = [x for x in predictors_nn if re.search("_p_", x) is None]
-    predictors_nn = [x for x in predictors_nn if re.search("_m_", x) is None]
-    predictors_nn = [x for x in predictors_nn if re.search("_d_", x) is None]
-    predictors_nn = [x for x in predictors_nn if re.search("_x_", x) is None]
-    mlp_trainer = MLPTrainer(
-        state_path="./models",
-        predictors=predictors_nn,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=1,
-        params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
-        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-    )
-    mlp_trainer = fit_trainer(mlp_trainer)
+        tprint("TRAIN NN")
+        mlp_trainer = MLPTrainer(
+            state_path="./models",
+            predictors=predictors_nn,
+            target_col="y",
+            X=train_df,
+            groups=train_df["base_year"],
+            test=test_df,
+            n_splits=5,
+            n_rsb=1,
+            params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+            categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+        )
+        mlp_trainer = fit_trainer(mlp_trainer)
 
     # blending
     stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, mlp_trainer.oof]
