@@ -20,12 +20,14 @@ import feather
 import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
+import optuna
 import pandas as pd
 import torch
 import torch.nn as nn
 import xgboost as xgb
 from jeraconv import jeraconv
 from scipy.optimize import minimize
+from sklearn.linear_model import BayesianRidge, Ridge
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold, KFold
 from sklearn.preprocessing import MinMaxScaler, RobustScaler
@@ -889,6 +891,88 @@ class TabNetTrainer(GroupKfoldTrainer):
         return pred
 
 
+class BayesianRidgeTrainer(GroupKfoldTrainer):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, n_trials):
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+        self.n_trials = n_trials
+
+    def _get_importance(self, model, importance_type="gain"):
+        return
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        set_seed(loop_seed)
+        ret = {}
+        # optuna
+        def objective(trial):
+            params = {
+                "alpha_1": trial.suggest_uniform("alpha_1", 0, 1),
+                "alpha_2": trial.suggest_uniform("alpha_2", 0, 1),
+                "lambda_1": trial.suggest_uniform("lambda_1", 0, 1),
+                "lambda_2": trial.suggest_uniform("lambda_2", 0, 1),
+            }
+            model = BayesianRidge(**params)
+            model.fit(X_train, Y_train)
+
+            # pred valid
+            pred_val = model.predict(X_valid[self.predictors])
+            score = self.loss_(Y_valid, pred_val)
+            return score
+
+        study = optuna.create_study(sampler=optuna.samplers.RandomSampler(seed=loop_seed))
+        study.optimize(objective, n_trials=self.n_trials)
+
+        # train
+        model = BayesianRidge(**study.best_trial.params)
+        model.fit(X_train, Y_train)
+        ret["model"] = model
+
+        return ret
+
+    def _predict(self, model, X):
+        pred = model.predict(X[self.predictors].values)
+        return pred
+
+
+class RidgeTrainer(GroupKfoldTrainer):
+    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, n_trials):
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
+        self.n_trials = n_trials
+
+    def _get_importance(self, model, importance_type="gain"):
+        return
+
+    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
+        set_seed(loop_seed)
+        ret = {}
+        # optuna
+        def objective(trial):
+            params = {
+                "alpha": trial.suggest_uniform("alpha", 0, 5),
+                "normalize": trial.suggest_categorical("normalize", [True, False]),
+            }
+            model = Ridge(**params, random_state=loop_seed)
+            model.fit(X_train, Y_train)
+
+            # pred valid
+            pred_val = model.predict(X_valid[self.predictors])
+            score = self.loss_(Y_valid, pred_val)
+            return score
+
+        study = optuna.create_study(sampler=optuna.samplers.RandomSampler(seed=loop_seed))
+        study.optimize(objective, n_trials=self.n_trials)
+
+        # train
+        model = Ridge(**study.best_trial.params, random_state=loop_seed)
+        model.fit(X_train, Y_train)
+        ret["model"] = model
+
+        return ret
+
+    def _predict(self, model, X):
+        pred = model.predict(X[self.predictors].values)
+        return pred
+
+
 def get_score(weights, train_idx, oofs, labels):
     blend = np.zeros_like(oofs[0][train_idx])
 
@@ -921,12 +1005,30 @@ def get_best_weights(oofs, labels):
 @Cache("./cache")
 def fit_trainer(trainer_instance):
     trainer_instance.fit()
+    del trainer_instance.X
     trainer_instance.save()
     return trainer_instance
 
 
+def get_oof_pred_from_dict(first_models: Dict, base_year: pd.Series, y: pd.Series) -> Tuple[pd.DataFrame]:
+    oof_li = []
+    pred_li = []
+    col_names_li = []
+    for k, v in first_models.items():
+        col_names_li.append(k)
+        oof_li.append(pd.Series(v.oof))
+        pred_li.append(pd.Series(v.pred))
+    oof_df = pd.concat(oof_li, axis=1)
+    pred_df = pd.concat(pred_li, axis=1)
+    oof_df.columns = col_names_li
+    pred_df.columns = col_names_li
+    oof_df["base_year"] = base_year
+    oof_df["y"] = y
+    return oof_df, pred_df
+
+
 if __name__ == "__main__":
-    debug = False
+    debug = True
     tprint(f"debug mode {debug}")
 
     tprint("loading data")
@@ -937,14 +1039,16 @@ if __name__ == "__main__":
     train_df = reduce_mem_usage(train_df)
     test_df = reduce_mem_usage(test_df)
     if debug:
-        train_df = train_df.sample(10000, random_state=100).reset_index(drop=True)
+        train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
     predictors = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
+    first_models = {}
     if debug:
         n_splits = 2
         n_rsb = 1
     else:
         n_splits = 6
         n_rsb = 1
+
     if True:
         tprint("TRAIN LightGBM")
         params = {
@@ -969,6 +1073,7 @@ if __name__ == "__main__":
             categorical_cols=["pref", "pref_city", "pref_city_district"],
         )
         lgb_trainer = fit_trainer(lgb_trainer)
+        first_models["lgb"] = lgb_trainer
 
         tprint("TRAIN LightGBM xent")
         params = {
@@ -977,7 +1082,7 @@ if __name__ == "__main__":
             "subsample": 0.8,
             "colsample_bytree": 0.8,
             "device": "cpu",
-            "learning_rate": 0.1,
+            "learning_rate": 0.01,
             "verbosity": -1,
         }
         xent_trainer = LGBTrainer(
@@ -993,6 +1098,7 @@ if __name__ == "__main__":
             categorical_cols=["pref", "pref_city", "pref_city_district"],
         )
         xent_trainer = fit_trainer(xent_trainer)
+        first_models["xent"] = xent_trainer
     if True:
         tprint("TRAIN XGBoost")
         params = {
@@ -1016,6 +1122,7 @@ if __name__ == "__main__":
             categorical_cols=[],
         )
         xgb_trainer = fit_trainer(xgb_trainer)
+        first_models["xgb"] = xgb_trainer
 
         tprint("TRAIN TabNet")
         predictors_nn = [
@@ -1033,12 +1140,13 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=5,
+            n_splits=n_splits,
             n_rsb=1,
             params={},
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
         )
         tab_trainer = fit_trainer(tab_trainer)
+        first_models["tab"] = tab_trainer
 
         tprint("TRAIN NN")
         mlp_trainer = MLPTrainer(
@@ -1048,16 +1156,48 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=5,
+            n_splits=n_splits,
             n_rsb=1,
             params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
         )
         mlp_trainer = fit_trainer(mlp_trainer)
+        first_models["mlp"] = mlp_trainer
+
+    # 2nd models
+    oof_df, pred_df = get_oof_pred_from_dict(first_models, train_df["base_year"], train_df["y"])
+    predictors_2nd = [x for x in oof_df.columns if x not in ["y", "base_year"]]
+    tprint("TRAIN Bayesian Ridge")
+    bridge_trainer = BayesianRidgeTrainer(
+        state_path="./models",
+        predictors=predictors_2nd,
+        target_col="y",
+        X=oof_df,
+        groups=oof_df["base_year"],
+        test=pred_df,
+        n_splits=n_splits,
+        n_rsb=1,
+        n_trials=10,
+    )
+    bridge_trainer = fit_trainer(bridge_trainer)
+
+    tprint("TRAIN Ridge")
+    ridge_trainer = RidgeTrainer(
+        state_path="./models",
+        predictors=predictors_2nd,
+        target_col="y",
+        X=oof_df,
+        groups=oof_df["base_year"],
+        test=pred_df,
+        n_splits=n_splits,
+        n_rsb=1,
+        n_trials=10,
+    )
+    ridge_trainer = fit_trainer(ridge_trainer)
 
     # blending
-    stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, mlp_trainer.oof]
-    stage2_preds = [lgb_trainer.pred, xent_trainer.pred, xgb_trainer.pred, mlp_trainer.pred]
+    stage2_oofs = [bridge_trainer.oof, ridge_trainer.oof]
+    stage2_preds = [bridge_trainer.pred, ridge_trainer.pred]
     best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
     best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
     tprint("post processed optimized weight", best_weights)
