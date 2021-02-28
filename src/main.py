@@ -681,6 +681,7 @@ class MLPTrainer(GroupKfoldTrainer):
         torch.backends.cudnn.benchmark = True
         self.criterion = nn.L1Loss()
         best_score = 100000
+        best_iteration = 0
         for epoch in range(self.params["n_epoch"]):
             # train model...
             for train_batch in train_loader:
@@ -728,7 +729,12 @@ class MLPTrainer(GroupKfoldTrainer):
                 # モデルそのものを保存すると参照渡しになるので、わざわざ重みをコピーしてあとで入れるみたいなことをしている。
                 best_model_wts = copy.deepcopy(network.state_dict())
                 best_score = val_loss
+                best_iteration = epoch
                 print(f"model updated. best score is {best_score}")
+            # early_stopping
+            if (epoch - best_iteration) > self.params["early_stopping_rounds"]:
+                print(f"early stopping. use {best_iteration}th model")
+                break
         print("\n")
         tprint(f"NN result: {val_loss_plot}")
 
@@ -1052,6 +1058,7 @@ if __name__ == "__main__":
         predictors_nn = [x for x in predictors_nn if re.search("_m_", x) is None]
         predictors_nn = [x for x in predictors_nn if re.search("_d_", x) is None]
         predictors_nn = [x for x in predictors_nn if re.search("_x_", x) is None]
+
         tab_trainer = TabNetTrainer(
             state_path="./models",
             predictors=predictors_nn,
@@ -1077,7 +1084,14 @@ if __name__ == "__main__":
             test=test_df,
             n_splits=n_splits_small,
             n_rsb=1,
-            params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
+            params={
+                "n_epoch": 10 if debug else 100,
+                "lr": 1e-3,
+                "batch_size": 512,
+                "patience": 10,
+                "factor": 0.1,
+                "early_stopping_rounds": 20,
+            },
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
         )
         mlp_trainer = fit_trainer(mlp_trainer)
