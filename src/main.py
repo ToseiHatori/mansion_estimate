@@ -1043,9 +1043,11 @@ if __name__ == "__main__":
     first_models = {}
     if debug:
         n_splits = 2
+        n_splits_small = 2
         n_rsb = 1
     else:
         n_splits = 6
+        n_splits_small = 4
         n_rsb = 1
 
     if True:
@@ -1115,7 +1117,7 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=n_splits,
+            n_splits=n_splits_small,
             n_rsb=1,
             params=params,
             categorical_cols=[],
@@ -1139,7 +1141,7 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=n_splits,
+            n_splits=n_splits_small,
             n_rsb=1,
             params={},
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
@@ -1155,7 +1157,7 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=n_splits,
+            n_splits=n_splits_small,
             n_rsb=1,
             params={"n_epoch": 1 if debug else 100, "lr": 1e-3, "batch_size": 512, "patience": 10, "factor": 0.1},
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
