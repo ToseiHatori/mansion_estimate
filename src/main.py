@@ -178,6 +178,14 @@ def get_inter_features(df, inter_cols):
     return df
 
 
+def get_agg_feature(_df: pd.DataFrame, agg_cols: List[str]):
+    agg_df = _df.groupby(agg_cols).size().reset_index()
+    col_name = "cnt_" + "_".join(agg_cols)
+    agg_df.columns = agg_cols + [col_name]
+    _df = _df.merge(agg_df, on=agg_cols, how="left")
+    return _df
+
+
 @Cache("./cache")
 def preprocess(train_df, test_df):
     # 目的変数rename
@@ -295,6 +303,14 @@ def preprocess(train_df, test_df):
             df[inter_cols_scaled] = transformer.transform(df[inter_cols])
         df = get_inter_features(df, inter_cols)
         df = get_inter_features(df, inter_cols_scaled)
+
+    # 集計変数
+    train_df = get_agg_feature(train_df, ["pref_city_district", "base_year_quater"])
+    test_df = get_agg_feature(test_df, ["pref_city_district", "base_year_quater"])
+    train_df = get_agg_feature(train_df, ["pref_city", "base_year_quater"])
+    test_df = get_agg_feature(test_df, ["pref_city", "base_year_quater"])
+    train_df = get_agg_feature(train_df, ["pref", "base_year_quater"])
+    test_df = get_agg_feature(test_df, ["pref", "base_year_quater"])
 
     # null数
     original_columns = [
@@ -930,23 +946,6 @@ def fit_trainer(trainer_instance):
     return trainer_instance
 
 
-def get_oof_pred_from_dict(first_models: Dict, base_year: pd.Series, y: pd.Series) -> Tuple[pd.DataFrame]:
-    oof_li = []
-    pred_li = []
-    col_names_li = []
-    for k, v in first_models.items():
-        col_names_li.append(k)
-        oof_li.append(pd.Series(v.oof))
-        pred_li.append(pd.Series(v.pred))
-    oof_df = pd.concat(oof_li, axis=1)
-    pred_df = pd.concat(pred_li, axis=1)
-    oof_df.columns = col_names_li
-    pred_df.columns = col_names_li
-    oof_df["base_year"] = base_year
-    oof_df["y"] = y
-    return oof_df, pred_df
-
-
 if __name__ == "__main__":
     debug = False
     tprint(f"debug mode {debug}")
@@ -961,6 +960,7 @@ if __name__ == "__main__":
     if not debug:
         feather.write_dataframe(train_df, "./data/processed/train_df.feather")
         feather.write_dataframe(test_df, "./data/processed/test_df.feather")
+    tprint(list(train_df.columns))
     if debug:
         train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
     predictors = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
