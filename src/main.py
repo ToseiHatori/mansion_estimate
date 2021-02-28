@@ -901,10 +901,10 @@ class BayesianRidgeTrainer(GroupKfoldTrainer):
         # optuna
         def objective(trial):
             params = {
-                "alpha_1": trial.suggest_uniform("alpha_1", 0, 1),
-                "alpha_2": trial.suggest_uniform("alpha_2", 0, 1),
-                "lambda_1": trial.suggest_uniform("lambda_1", 0, 1),
-                "lambda_2": trial.suggest_uniform("lambda_2", 0, 1),
+                "alpha_1": trial.suggest_uniform("alpha_1", 0, 5),
+                "alpha_2": trial.suggest_uniform("alpha_2", 0, 5),
+                "lambda_1": trial.suggest_uniform("lambda_1", 0, 5),
+                "lambda_2": trial.suggest_uniform("lambda_2", 0, 5),
             }
             model = BayesianRidge(**params)
             model.fit(X_train, Y_train)
