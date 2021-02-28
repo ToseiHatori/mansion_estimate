@@ -190,7 +190,7 @@ def get_agg_feature(_df: pd.DataFrame, agg_cols: List[str]):
 def preprocess(train_df, test_df):
     # 目的変数rename
     train_df = train_df.rename(columns={"取引価格（総額）_log": "y"})
-    train_df = train_df[train_df["y"] >= 5].reset_index(drop=True)
+    train_df = train_df[train_df["y"] >= 6].reset_index(drop=True)
 
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
@@ -305,12 +305,14 @@ def preprocess(train_df, test_df):
         df = get_inter_features(df, inter_cols_scaled)
 
     # 集計変数
+    """
     train_df = get_agg_feature(train_df, ["pref_city_district", "base_year_quater"])
     test_df = get_agg_feature(test_df, ["pref_city_district", "base_year_quater"])
     train_df = get_agg_feature(train_df, ["pref_city", "base_year_quater"])
     test_df = get_agg_feature(test_df, ["pref_city", "base_year_quater"])
     train_df = get_agg_feature(train_df, ["pref", "base_year_quater"])
     test_df = get_agg_feature(test_df, ["pref", "base_year_quater"])
+    """
 
     # null数
     original_columns = [
@@ -971,7 +973,7 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_splits_small = 4
+        n_splits_small = 6
         n_rsb = 1
 
     if True:
