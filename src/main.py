@@ -1178,7 +1178,7 @@ if __name__ == "__main__":
         test=pred_df,
         n_splits=n_splits,
         n_rsb=n_rsb,
-        n_trials=100,
+        n_trials=1000,
     )
     bridge_trainer = fit_trainer(bridge_trainer)
 
