@@ -887,88 +887,6 @@ class TabNetTrainer(GroupKfoldTrainer):
         return pred
 
 
-class BayesianRidgeTrainer(GroupKfoldTrainer):
-    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, n_trials):
-        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
-        self.n_trials = n_trials
-
-    def _get_importance(self, model, importance_type="gain"):
-        return
-
-    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
-        set_seed(loop_seed)
-        ret = {}
-        # optuna
-        def objective(trial):
-            params = {
-                "alpha_1": trial.suggest_uniform("alpha_1", 0, 5),
-                "alpha_2": trial.suggest_uniform("alpha_2", 0, 5),
-                "lambda_1": trial.suggest_uniform("lambda_1", 0, 5),
-                "lambda_2": trial.suggest_uniform("lambda_2", 0, 5),
-            }
-            model = BayesianRidge(**params)
-            model.fit(X_train, Y_train)
-
-            # pred valid
-            pred_val = model.predict(X_valid[self.predictors])
-            score = self.loss_(Y_valid, pred_val)
-            return score
-
-        study = optuna.create_study(sampler=optuna.samplers.RandomSampler(seed=loop_seed))
-        study.optimize(objective, n_trials=self.n_trials)
-
-        # train
-        model = BayesianRidge(**study.best_trial.params)
-        model.fit(X_train, Y_train)
-        ret["model"] = model
-
-        return ret
-
-    def _predict(self, model, X):
-        pred = model.predict(X[self.predictors].values)
-        return pred
-
-
-class RidgeTrainer(GroupKfoldTrainer):
-    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, n_trials):
-        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
-        self.n_trials = n_trials
-
-    def _get_importance(self, model, importance_type="gain"):
-        return
-
-    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
-        set_seed(loop_seed)
-        ret = {}
-        # optuna
-        def objective(trial):
-            params = {
-                "alpha": trial.suggest_uniform("alpha", 0, 5),
-                "normalize": trial.suggest_categorical("normalize", [True, False]),
-            }
-            model = Ridge(**params, random_state=loop_seed)
-            model.fit(X_train, Y_train)
-
-            # pred valid
-            pred_val = model.predict(X_valid[self.predictors])
-            score = self.loss_(Y_valid, pred_val)
-            return score
-
-        study = optuna.create_study(sampler=optuna.samplers.RandomSampler(seed=loop_seed))
-        study.optimize(objective, n_trials=self.n_trials)
-
-        # train
-        model = Ridge(**study.best_trial.params, random_state=loop_seed)
-        model.fit(X_train, Y_train)
-        ret["model"] = model
-
-        return ret
-
-    def _predict(self, model, X):
-        pred = model.predict(X[self.predictors].values)
-        return pred
-
-
 def get_score(weights, train_idx, oofs, labels):
     blend = np.zeros_like(oofs[0][train_idx])
 
@@ -1164,38 +1082,6 @@ if __name__ == "__main__":
         )
         mlp_trainer = fit_trainer(mlp_trainer)
         first_models["mlp"] = mlp_trainer
-    """
-    # 2nd models
-    oof_df, pred_df = get_oof_pred_from_dict(first_models, train_df["base_year"], train_df["y"])
-    predictors_2nd = [x for x in oof_df.columns if x not in ["y", "base_year"]]
-    tprint("TRAIN Bayesian Ridge")
-    bridge_trainer = BayesianRidgeTrainer(
-        state_path="./models",
-        predictors=predictors_2nd,
-        target_col="y",
-        X=oof_df,
-        groups=oof_df["base_year"],
-        test=pred_df,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        n_trials=1000,
-    )
-    bridge_trainer = fit_trainer(bridge_trainer)
-
-    tprint("TRAIN Ridge")
-    ridge_trainer = RidgeTrainer(
-        state_path="./models",
-        predictors=predictors_2nd,
-        target_col="y",
-        X=oof_df,
-        groups=oof_df["base_year"],
-        test=pred_df,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        n_trials=100,
-    )
-    ridge_trainer = fit_trainer(ridge_trainer)
-    """
 
     # blending
     stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, tab_trainer.oof, mlp_trainer.oof]
