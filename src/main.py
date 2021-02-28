@@ -681,6 +681,7 @@ class MLPTrainer(GroupKfoldTrainer):
         torch.backends.cudnn.benchmark = True
         self.criterion = nn.L1Loss()
         best_score = 100000
+        best_iteration = 0
         for epoch in range(self.params["n_epoch"]):
             # train model...
             for train_batch in train_loader:
@@ -728,7 +729,12 @@ class MLPTrainer(GroupKfoldTrainer):
                 # モデルそのものを保存すると参照渡しになるので、わざわざ重みをコピーしてあとで入れるみたいなことをしている。
                 best_model_wts = copy.deepcopy(network.state_dict())
                 best_score = val_loss
+                best_iteration = epoch
                 print(f"model updated. best score is {best_score}")
+            # early_stopping
+            if (epoch - best_iteration) > self.params[early_stopping_rounds]:
+                print(f"early stopping. use {best_iteration}th model")
+                break
         print("\n")
         tprint(f"NN result: {val_loss_plot}")
 
