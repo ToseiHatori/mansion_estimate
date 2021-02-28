@@ -1164,7 +1164,7 @@ if __name__ == "__main__":
         )
         mlp_trainer = fit_trainer(mlp_trainer)
         first_models["mlp"] = mlp_trainer
-
+    """
     # 2nd models
     oof_df, pred_df = get_oof_pred_from_dict(first_models, train_df["base_year"], train_df["y"])
     predictors_2nd = [x for x in oof_df.columns if x not in ["y", "base_year"]]
@@ -1195,10 +1195,11 @@ if __name__ == "__main__":
         n_trials=100,
     )
     ridge_trainer = fit_trainer(ridge_trainer)
+    """
 
     # blending
-    stage2_oofs = [bridge_trainer.oof, ridge_trainer.oof]
-    stage2_preds = [bridge_trainer.pred, ridge_trainer.pred]
+    stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, tab_trainer.oof, mlp_trainer.oof]
+    stage2_preds = [lgb_trainer.pred, xent_trainer.pred, xgb_trainer.pred, tab_trainer.pred, mlp_trainer.pred]
     best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
     best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
     tprint("post processed optimized weight", best_weights)
