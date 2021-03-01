@@ -272,12 +272,16 @@ def preprocess(train_df, test_df):
     df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
 
     # カテゴリごとの統計量
-    # group_keyにlistが入らないので準備
+    unuse_cols = ["base_year", "base_quater", "base_quarter_sin", "base_quarter_cos", "timing_code"]
     for col in ["pref_city_district", "pref_city", "pref", "station"]:
         group_key = f"{col}_timing"
+        # group_keyにlistが入らないので準備
         df[group_key] = [str(x) + "_" + str(int(y)) for x, y in zip(df[col], df["timing_code_original"])]
         df, aggregated_cols = aggregation(
-            df, group_key=group_key, group_values=numeric_cols, agg_methods=["mean", "max", "min"]
+            df,
+            group_key=group_key,
+            group_values=[x for x in numeric_cols if x not in unuse_cols],
+            agg_methods=["mean", "max", "min"],
         )
         del df[group_key]
     del df["timing_code_original"]
@@ -289,13 +293,53 @@ def preprocess(train_df, test_df):
             ArithmeticCombinations(
                 input_cols=numeric_cols,
                 drop_origin=True,
+                output_suffix="_times",
                 operator="*",
                 r=2,
-            ),
+            )
         ]
     )
-    encoded_df = encoder.fit_transform(df[numeric_cols])
-    df = pd.concat([df, encoded_df], axis=1)
+    encoded_df_times = encoder.fit_transform(df[numeric_cols])
+    encoder = Pipeline(
+        [
+            SelectNumerical(),
+            ArithmeticCombinations(
+                input_cols=numeric_cols,
+                drop_origin=True,
+                output_suffix="_puls",
+                operator="+",
+                r=2,
+            )
+        ]
+    )
+    encoded_df_puls = encoder.fit_transform(df[numeric_cols])
+    encoder = Pipeline(
+        [
+            SelectNumerical(),
+            ArithmeticCombinations(
+                input_cols=numeric_cols,
+                drop_origin=True,
+                output_suffix="_minus",
+                operator="-",
+                r=2,
+            )
+        ]
+    )
+    encoded_df_minus = encoder.fit_transform(df[numeric_cols])
+    encoder = Pipeline(
+        [
+            SelectNumerical(),
+            ArithmeticCombinations(
+                input_cols=numeric_cols,
+                drop_origin=True,
+                output_suffix="_div",
+                operator="/",
+                r=2,
+            )
+        ]
+    )
+    encoded_df_div = encoder.fit_transform(df[numeric_cols])
+    df = pd.concat([df, encoded_df_times, encoded_df_puls, encoded_df_minus, encoded_df_div], axis=1)
 
     # label encoding
     category_columns = [
