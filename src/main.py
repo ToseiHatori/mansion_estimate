@@ -853,9 +853,9 @@ class TabNetTrainer(GroupKfoldTrainer):
             max_epoch=100,
             batch_size=1024,
             initialize_params=dict(
-                n_d=16,
-                n_a=16,
-                n_steps=3,
+                n_d=8,
+                n_a=8,
+                n_steps=2,
                 gamma=1.3,
                 cat_idxs=self.categorical_idx,
                 cat_dims=[48, 619, 15419, 3833],
