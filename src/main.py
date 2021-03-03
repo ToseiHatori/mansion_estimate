@@ -1025,7 +1025,7 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
     xent_trainer = fit_trainer(xent_trainer)
-    tprint(f"XENT SCORE IS {np.mean(lgb_trainer.validation_score):.4f}")
+    tprint(f"XENT SCORE IS {np.mean(xent_trainer.validation_score):.4f}")
     first_models["xent"] = xent_trainer
 
     if on_colab:
