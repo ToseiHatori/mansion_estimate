@@ -1110,6 +1110,7 @@ if __name__ == "__main__":
         oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
         blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
         tprint("final oof score", mean_absolute_error(train_df["y"].values, oof_preds))
+        tprint("writing result...")
         with open("./models/final_oof_and_pred.pickle", "wb") as f:
             pickle.dump([oof_preds, blend_preds], f)
 
