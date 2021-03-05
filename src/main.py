@@ -151,11 +151,9 @@ def reduce_mem_usage(df, logger=None, level=logging.DEBUG):
 
 
 @Cache("./cache")
-def get_data(debug):
+def get_data():
     unuse_columns = ["種類", "地域", "市区町村コード", "土地の形状", "間口", "延床面積（㎡）", "前面道路：方位", "前面道路：種類", "前面道路：幅員（ｍ）"]
     train_files = sorted(glob.glob("./data/raw/train/*"))
-    if debug:
-        train_files = train_files[0:3]
     train_df = []
     for file in train_files:
         train_df.append(pd.read_csv(file, low_memory=False))
@@ -953,7 +951,7 @@ if __name__ == "__main__":
     tprint(f"debug mode {debug}")
 
     tprint("loading data")
-    (train_df, test_df, sample_submission) = get_data(debug)
+    (train_df, test_df, sample_submission) = get_data()
     tprint("preprocessing data")
     (train_df, test_df) = preprocess(train_df, test_df)
     tprint("reduce memory usage")
@@ -969,11 +967,9 @@ if __name__ == "__main__":
     first_models = {}
     if debug:
         n_splits = 2
-        n_splits_small = 2
         n_rsb = 1
     else:
         n_splits = 6
-        n_splits_small = 6
         n_rsb = 1
     on_colab = "google.colab" in sys.modules
     tprint("TRAIN LightGBM")
@@ -1045,7 +1041,7 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=n_splits_small,
+            n_splits=n_splits,
             n_rsb=1,
             params=params,
             categorical_cols=[],
@@ -1070,7 +1066,7 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=n_splits_small,
+            n_splits=n_splits,
             n_rsb=1,
             params={},
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
@@ -1086,7 +1082,7 @@ if __name__ == "__main__":
             X=train_df,
             groups=train_df["base_year"],
             test=test_df,
-            n_splits=n_splits_small,
+            n_splits=n_splits,
             n_rsb=1,
             params={
                 "n_epoch": 10 if debug else 100,
