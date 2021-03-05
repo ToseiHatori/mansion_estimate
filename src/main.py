@@ -14,7 +14,7 @@ import subprocess
 from inspect import signature
 from pathlib import Path
 from typing import Any, ByteString, Callable, Dict, List, Optional, Tuple, Union
-
+import sys
 import category_encoders as ce
 import feather
 import lightgbm as lgb
@@ -178,11 +178,19 @@ def get_inter_features(df, inter_cols):
     return df
 
 
+def get_agg_feature(_df: pd.DataFrame, agg_cols: List[str]):
+    agg_df = _df.groupby(agg_cols).size().reset_index()
+    col_name = "cnt_" + "_".join(agg_cols)
+    agg_df.columns = agg_cols + [col_name]
+    _df = _df.merge(agg_df, on=agg_cols, how="left")
+    return _df
+
+
 @Cache("./cache")
 def preprocess(train_df, test_df):
     # 目的変数rename
     train_df = train_df.rename(columns={"取引価格（総額）_log": "y"})
-    train_df = train_df[train_df["y"] >= 5].reset_index(drop=True)
+    train_df = train_df[train_df["y"] >= 6].reset_index(drop=True)
 
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
@@ -295,6 +303,16 @@ def preprocess(train_df, test_df):
             df[inter_cols_scaled] = transformer.transform(df[inter_cols])
         df = get_inter_features(df, inter_cols)
         df = get_inter_features(df, inter_cols_scaled)
+
+    # 集計変数
+    """
+    train_df = get_agg_feature(train_df, ["pref_city_district", "base_year_quater"])
+    test_df = get_agg_feature(test_df, ["pref_city_district", "base_year_quater"])
+    train_df = get_agg_feature(train_df, ["pref_city", "base_year_quater"])
+    test_df = get_agg_feature(test_df, ["pref_city", "base_year_quater"])
+    train_df = get_agg_feature(train_df, ["pref", "base_year_quater"])
+    test_df = get_agg_feature(test_df, ["pref", "base_year_quater"])
+    """
 
     # null数
     original_columns = [
@@ -835,9 +853,9 @@ class TabNetTrainer(GroupKfoldTrainer):
             max_epoch=100,
             batch_size=1024,
             initialize_params=dict(
-                n_d=16,
-                n_a=16,
-                n_steps=3,
+                n_d=8,
+                n_a=8,
+                n_steps=2,
                 gamma=1.3,
                 cat_idxs=self.categorical_idx,
                 cat_dims=[48, 619, 15419, 3833],
@@ -930,23 +948,6 @@ def fit_trainer(trainer_instance):
     return trainer_instance
 
 
-def get_oof_pred_from_dict(first_models: Dict, base_year: pd.Series, y: pd.Series) -> Tuple[pd.DataFrame]:
-    oof_li = []
-    pred_li = []
-    col_names_li = []
-    for k, v in first_models.items():
-        col_names_li.append(k)
-        oof_li.append(pd.Series(v.oof))
-        pred_li.append(pd.Series(v.pred))
-    oof_df = pd.concat(oof_li, axis=1)
-    pred_df = pd.concat(pred_li, axis=1)
-    oof_df.columns = col_names_li
-    pred_df.columns = col_names_li
-    oof_df["base_year"] = base_year
-    oof_df["y"] = y
-    return oof_df, pred_df
-
-
 if __name__ == "__main__":
     debug = False
     tprint(f"debug mode {debug}")
@@ -961,6 +962,7 @@ if __name__ == "__main__":
     if not debug:
         feather.write_dataframe(train_df, "./data/processed/train_df.feather")
         feather.write_dataframe(test_df, "./data/processed/test_df.feather")
+    tprint(list(train_df.columns))
     if debug:
         train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
     predictors = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
@@ -971,60 +973,62 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_splits = 6
-        n_splits_small = 4
+        n_splits_small = 6
         n_rsb = 1
+    on_colab = "google.colab" in sys.modules
+    tprint("TRAIN LightGBM")
+    params = {
+        "objective": "mae",
+        "boosting_type": "gbdt",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "device": "cpu",
+        "learning_rate": 0.1,
+        "verbosity": -1,
+    }
+    lgb_trainer = LGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params=params,
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
+    )
+    lgb_trainer = fit_trainer(lgb_trainer)
+    tprint(f"LGBM SCORE IS {np.mean(lgb_trainer.validation_score):.4f}")
+    first_models["lgb"] = lgb_trainer
 
-    if True:
-        tprint("TRAIN LightGBM")
-        params = {
-            "objective": "mae",
-            "boosting_type": "gbdt",
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "device": "cpu",
-            "learning_rate": 0.1,
-            "verbosity": -1,
-        }
-        lgb_trainer = LGBTrainer(
-            state_path="./models",
-            predictors=predictors,
-            target_col="y",
-            X=train_df,
-            groups=train_df["base_year"],
-            test=test_df,
-            n_splits=n_splits,
-            n_rsb=n_rsb,
-            params=params,
-            categorical_cols=["pref", "pref_city", "pref_city_district"],
-        )
-        lgb_trainer = fit_trainer(lgb_trainer)
-        first_models["lgb"] = lgb_trainer
+    tprint("TRAIN LightGBM xent")
+    params = {
+        "objective": "xentropy",
+        "boosting_type": "gbdt",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "device": "cpu",
+        "learning_rate": 0.01,
+        "verbosity": -1,
+    }
+    xent_trainer = LGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params=params,
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
+    )
+    xent_trainer = fit_trainer(xent_trainer)
+    tprint(f"XENT SCORE IS {np.mean(xent_trainer.validation_score):.4f}")
+    first_models["xent"] = xent_trainer
 
-        tprint("TRAIN LightGBM xent")
-        params = {
-            "objective": "xentropy",
-            "boosting_type": "gbdt",
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "device": "cpu",
-            "learning_rate": 0.01,
-            "verbosity": -1,
-        }
-        xent_trainer = LGBTrainer(
-            state_path="./models",
-            predictors=predictors,
-            target_col="y",
-            X=train_df,
-            groups=train_df["base_year"],
-            test=test_df,
-            n_splits=n_splits,
-            n_rsb=n_rsb,
-            params=params,
-            categorical_cols=["pref", "pref_city", "pref_city_district"],
-        )
-        xent_trainer = fit_trainer(xent_trainer)
-        first_models["xent"] = xent_trainer
-    if True:
+    if on_colab:
         tprint("TRAIN XGBoost")
         params = {
             "objective": "reg:squarederror",
@@ -1097,19 +1101,20 @@ if __name__ == "__main__":
         mlp_trainer = fit_trainer(mlp_trainer)
         first_models["mlp"] = mlp_trainer
 
-    # blending
-    stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, tab_trainer.oof, mlp_trainer.oof]
-    stage2_preds = [lgb_trainer.pred, xent_trainer.pred, xgb_trainer.pred, tab_trainer.pred, mlp_trainer.pred]
-    best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
-    best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
-    tprint("post processed optimized weight", best_weights)
-    oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
-    blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
-    tprint("final oof score", mean_absolute_error(train_df["y"].values, oof_preds))
-    with open("./models/final_oof_and_pred.pickle", "wb") as f:
-        pickle.dump([oof_preds, blend_preds], f)
+        # blending
+        stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, tab_trainer.oof, mlp_trainer.oof]
+        stage2_preds = [lgb_trainer.pred, xent_trainer.pred, xgb_trainer.pred, tab_trainer.pred, mlp_trainer.pred]
+        best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
+        best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
+        tprint("post processed optimized weight", best_weights)
+        oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
+        blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
+        tprint("final oof score", mean_absolute_error(train_df["y"].values, oof_preds))
+        tprint("writing result...")
+        with open("./models/final_oof_and_pred.pickle", "wb") as f:
+            pickle.dump([oof_preds, blend_preds], f)
 
-    # submit
-    sample_submission["取引価格（総額）_log"] = blend_preds
-    sample_submission.to_csv("./submit.csv", index=False)
-    tprint("---おわり---")
+        # submit
+        sample_submission["取引価格（総額）_log"] = blend_preds
+        sample_submission.to_csv("./submit.csv", index=False)
+        tprint("---おわり---")
