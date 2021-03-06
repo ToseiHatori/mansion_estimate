@@ -11,10 +11,11 @@ import pickle
 import random
 import re
 import subprocess
+import sys
 from inspect import signature
 from pathlib import Path
 from typing import Any, ByteString, Callable, Dict, List, Optional, Tuple, Union
-import sys
+
 import category_encoders as ce
 import feather
 import lightgbm as lgb
@@ -25,17 +26,17 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import xgboost as xgb
-from jeraconv import jeraconv
+from pytorch_tabnet.tab_model import TabNetRegressor
 from scipy.optimize import minimize
 from sklearn.linear_model import BayesianRidge, Ridge
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold, KFold
-from sklearn.preprocessing import MinMaxScaler, RobustScaler
+from sklearn.preprocessing import MinMaxScaler
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
-from pytorch_tabnet.tab_model import TabNetRegressor
+from xfeat import ArithmeticCombinations, Pipeline, SelectNumerical, aggregation
 
 gc.enable()
 pd.options.display.max_columns = None
@@ -123,7 +124,11 @@ def reduce_mem_usage(df, logger=None, level=logging.DEBUG):
     print_("Memory usage of dataframe is {:.2f} MB".format(start_mem))
 
     for col in df.columns:
-        col_type = df[col].dtype
+        try:
+            col_type = df[col].dtype
+        except:
+            print(col)
+            print(df[col].head())
         if col_type != "object" and col_type != "datetime64[ns]":
             c_min = df[col].min()
             c_max = df[col].max()
@@ -163,32 +168,40 @@ def get_data():
     return train_df, test_df, sample_submission
 
 
-def get_inter_features(df, inter_cols):
-    for i, col_1 in enumerate(inter_cols):
-        for j, col_2 in enumerate(inter_cols):
-            if i != j:
-                if (df[col_2] == 0).sum() == 0:
-                    df[f"{col_1}_d_{col_2}"] = df[col_1] / df[col_2]
-            if i < j:
-                df[f"{col_1}_x_{col_2}"] = df[col_1] * df[col_2]
-                df[f"{col_1}_p_{col_2}"] = df[col_1] + df[col_2]
-                df[f"{col_1}_m_{col_2}"] = df[col_1] - df[col_2]
-    return df
-
-
-def get_agg_feature(_df: pd.DataFrame, agg_cols: List[str]):
-    agg_df = _df.groupby(agg_cols).size().reset_index()
-    col_name = "cnt_" + "_".join(agg_cols)
-    agg_df.columns = agg_cols + [col_name]
-    _df = _df.merge(agg_df, on=agg_cols, how="left")
-    return _df
-
-
 @Cache("./cache")
 def preprocess(train_df, test_df):
-    # 目的変数rename
-    train_df = train_df.rename(columns={"取引価格（総額）_log": "y"})
-    train_df = train_df[train_df["y"] >= 6].reset_index(drop=True)
+    # 10万円以下の物件を除外
+    train_df = train_df[train_df["取引価格（総額）_log"] >= 6].reset_index(drop=True)
+
+    # 結合
+    train_df["is_train"] = 1
+    test_df["is_train"] = 0
+    df = pd.concat([train_df, test_df], axis=0).reset_index(drop=True)
+
+    # rename
+    df = df.rename(
+        columns={
+            "取引価格（総額）_log": "y",
+        }
+    )
+
+    # 欠損数
+    df["null_num"] = df.isnull().sum(axis=1)
+
+    # 都道府県+市区町村、都道府県+市区町村+地区名を取得
+    df["pref"] = df["都道府県名"]
+    df["pref_city"] = df["都道府県名"] + df["市区町村名"]
+    df["pref_city_district"] = df["都道府県名"] + df["市区町村名"] + df["地区名"]
+    del df["都道府県名"], df["市区町村名"], df["地区名"]
+
+    # 駅関係を取得
+    df["station"] = df["最寄駅：名称"]
+    df["最寄駅：距離（分）"] = [x if x != "1H30?2H" else "105" for x in df["最寄駅：距離（分）"]]
+    df["最寄駅：距離（分）"] = [x if x != "1H?1H30" else "75" for x in df["最寄駅：距離（分）"]]
+    df["最寄駅：距離（分）"] = [x if x != "2H?" else "120" for x in df["最寄駅：距離（分）"]]
+    df["最寄駅：距離（分）"] = [x if x != "30分?60分" else "45" for x in df["最寄駅：距離（分）"]]
+    df["time_to_station"] = df["最寄駅：距離（分）"].astype(float)
+    del df["最寄駅：距離（分）"], df["最寄駅：名称"]
 
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
@@ -197,157 +210,92 @@ def preprocess(train_df, test_df):
         else:
             return None
 
-    for i, df in enumerate([train_df, test_df]):
-        # 都道府県+市区町村、都道府県+市区町村+地区名を取得
-        df["pref"] = df["都道府県名"]
-        df["pref_city"] = df["都道府県名"] + df["市区町村名"]
-        df["pref_city_district"] = df["都道府県名"] + df["市区町村名"] + df["地区名"]
+    # 物件情報、間取り
+    df["plan"] = df["間取り"]
+    df["plan_num"] = [re_searcher("(\d)+", x) for x in df["間取り"].fillna("")]
+    del df["間取り"]
 
-        # 駅関係を取得
-        df["station"] = df["最寄駅：名称"]
-        df["最寄駅：距離（分）"] = [x if x != "1H30?2H" else "105" for x in df["最寄駅：距離（分）"]]
-        df["最寄駅：距離（分）"] = [x if x != "1H?1H30" else "75" for x in df["最寄駅：距離（分）"]]
-        df["最寄駅：距離（分）"] = [x if x != "2H?" else "120" for x in df["最寄駅：距離（分）"]]
-        df["最寄駅：距離（分）"] = [x if x != "30分?60分" else "45" for x in df["最寄駅：距離（分）"]]
-        df["time_to_station"] = df["最寄駅：距離（分）"].astype(float)
+    # 物件情報、面積
+    df["面積（㎡）"] = [x if x != "2000㎡以上" else "2000" for x in df["面積（㎡）"]]
+    df["面積（㎡）"] = [x if x != "m^2未満" else "2" for x in df["面積（㎡）"]]
+    df["area"] = df["面積（㎡）"].astype(float)
+    del df["面積（㎡）"]
 
-        # 物件情報、間取り
-        df["plan"] = df["間取り"]
-        df["plan_num"] = [re_searcher("(\d)+", x) for x in df["間取り"].fillna("")]
-        df["plan_LDK"] = [int("ＬＤＫ" in x) for x in df["間取り"].fillna("")]
-        df["plan_LD"] = [int("ＬＤ" in x) for x in df["間取り"].fillna("")]
-        df["plan_DK"] = [int("ＤＫ" in x) for x in df["間取り"].fillna("")]
-        df["plan_L"] = [int("Ｌ" in x) for x in df["間取り"].fillna("")]
-        df["plan_D"] = [int("Ｄ" in x) for x in df["間取り"].fillna("")]
-        df["plan_K"] = [int("Ｋ" in x) for x in df["間取り"].fillna("")]
-        df["plan_R"] = [int("Ｒ" in x) for x in df["間取り"].fillna("")]
-        df["plan_S"] = [int("S" in x) for x in df["間取り"].fillna("")]
+    # 建築年
+    def convert_years(x: str):
+        head_str = x[:2]
+        value_str = x[2:-1]
+        if head_str == "不明":
+            return np.nan
+        elif head_str == "戦前":
+            return 1945
+        elif head_str == "昭和":
+            return 1925 + int(value_str)
+        elif head_str == "平成":
+            return 1988 + int(value_str)
+        elif head_str == "令和":
+            return 2018 + int(value_str)
 
-        # 物件情報、面積
-        df["面積（㎡）"] = [x if x != "2000㎡以上" else "2000" for x in df["面積（㎡）"]]
-        df["面積（㎡）"] = [x if x != "m^2未満" else "2" for x in df["面積（㎡）"]]
-        df["area"] = df["面積（㎡）"].astype(float)
+    df["year_of_construction"] = [float(convert_years(x)) for x in df["建築年"].fillna("不明")]
+    del df["建築年"]
 
-        # 建築年
-        j2w = jeraconv.J2W()
-        y = [x if x != "戦前" else "昭和10年" for x in df["建築年"].fillna("不明")]
-        df["year_of_construction"] = [j2w.convert(x) if x != "不明" else None for x in y]
+    # その他
+    df["structure"] = df["建物の構造"]
+    del df["建物の構造"]
+    df["usage"] = df["用途"]
+    del df["用途"]
+    df["reason"] = df["取引の事情等"]
+    del df["取引の事情等"]
+    df["future_usage"] = df["今後の利用目的"]
+    df["city_plan"] = df["都市計画"]
+    df["building_coverage_ratio"] = df["建ぺい率（％）"].astype(float)
+    df["floor_area_ratio"] = df["容積率（％）"].astype(float)
+    df["remodeling"] = df["改装"]
+    del df["今後の利用目的"], df["都市計画"], df["建ぺい率（％）"], df["容積率（％）"], df["改装"]
+    # 取引時期など
+    df["base_year"] = [int(x[0:4]) for x in df["取引時点"]]
+    df["base_quarter"] = [int(x[6:7]) for x in df["取引時点"]]
+    df["timing_code"] = [y + (4 * (x - 2005)) for x, y in zip(df["base_year"], df["base_quarter"])]
+    # sin, cos
+    x = 2 * np.pi * (df["base_quarter"] / max(df["base_quarter"]))
+    df["base_quarter_sin"] = np.sin(x)
+    df["base_quarter_cos"] = np.cos(x)
+    df["passed_year"] = df["base_year"] - df["year_of_construction"]
+    del df["取引時点"]
 
-        # 建物の構造
-        df["structure"] = df["建物の構造"]
-        df["structure_block"] = [int("ブロック造" in x) for x in df["建物の構造"].fillna("")]
-        df["structure_wood"] = [int("木造" in x) for x in df["建物の構造"].fillna("")]
-        df["structure_lightiron"] = [int("軽量鉄骨造" in x) for x in df["建物の構造"].fillna("")]
-        df["structure_iron"] = [int("鉄骨造" in x) for x in df["建物の構造"].fillna("")]
-        df["structure_RC"] = [int("ＲＣ" in x) for x in df["建物の構造"].fillna("")]  # SRCも含まれるけどいいのか
-        df["structure_SRC"] = [int("ＳＲＣ" in x) for x in df["建物の構造"].fillna("")]
-
-        # 用途
-        df["usage"] = df["用途"]
-        df["usage_sonota"] = [int("その他" in x) for x in df["用途"].fillna("")]
-        df["usage_office"] = [int("事務所" in x) for x in df["用途"].fillna("")]
-        df["usage_warehouse"] = [int("倉庫" in x) for x in df["用途"].fillna("")]
-        df["usage_shop"] = [int("店舗" in x) for x in df["用途"].fillna("")]
-        df["usage_parking"] = [int("駐車場" in x) for x in df["用途"].fillna("")]
-        df["usage_house"] = [int("住宅" in x) for x in df["用途"].fillna("")]
-        df["usage_workshop"] = [int("作業場" in x) for x in df["用途"].fillna("")]
-        df["usage_factory"] = [int("工場" in x) for x in df["用途"].fillna("")]
-
-        # 今後の利用目的、都市計画、建ぺい率、改装
-        df["future_usage"] = df["今後の利用目的"]
-        df["city_plan"] = df["都市計画"]
-        df["building_coverage_ratio"] = df["建ぺい率（％）"].astype(float)
-        df["floor_area_ratio"] = df["容積率（％）"].astype(float)
-        df["remodeling"] = df["改装"]
-
-        # 取引時期など
-        df["base_year"] = [int(x[0:4]) for x in df["取引時点"]]
-        df["base_quarter"] = [int(x[6:7]) for x in df["取引時点"]]
-        df["timing_code"] = [y + (4 * (x - 2005)) for x, y in zip(df["base_year"], df["base_quarter"])]
-        # sin, cos
-        x = 2 * np.pi * (df["base_quarter"] / max(df["base_quarter"]))
-        df["base_quarter_sin"] = np.sin(x)
-        df["base_quarter_cos"] = np.cos(x)
-        df["base_year_quater"] = [int(str(x) + str(y)) for x, y in zip(df["base_year"], df["base_quarter"])]
-        df["passed_year"] = df["base_year"] - df["year_of_construction"]
-
-        # 取引の事情等
-        df["reason"] = df["取引の事情等"]
-        df["reason_other"] = [int("その他事情有り" in x) for x in df["取引の事情等"].fillna("")]
-        df["reason_burden"] = [int("他の権利・負担付き" in x) for x in df["取引の事情等"].fillna("")]
-        df["reason_auction"] = [int("調停・競売等" in x) for x in df["取引の事情等"].fillna("")]
-        df["reason_defects"] = [int("瑕疵有りの可能性" in x) for x in df["取引の事情等"].fillna("")]
-        df["reason_related_parties"] = [int("関係者間取引" in x) for x in df["取引の事情等"].fillna("")]
-
-        # いろいろな組み合わせ変数を作る
-        inter_cols = [
-            "year_of_construction",
-            "area",
-            "passed_year",
-            "time_to_station",
-            "base_year",
-            "base_quarter",
-            "base_year_quater",
-            "floor_area_ratio",
-            "plan_num",
-            "building_coverage_ratio",
-        ]
-        inter_cols_scaled = [x + "_scaled" for x in inter_cols]
-        # min_max_scaling(足し算変数などにスケールを合わせたい)
-        if i == 0:
-            transformer = MinMaxScaler()
-            df[inter_cols_scaled] = transformer.fit_transform(df[inter_cols])
-        else:
-            df[inter_cols_scaled] = transformer.transform(df[inter_cols])
-        df = get_inter_features(df, inter_cols)
-        df = get_inter_features(df, inter_cols_scaled)
-
-    # 集計変数
-    """
-    train_df = get_agg_feature(train_df, ["pref_city_district", "base_year_quater"])
-    test_df = get_agg_feature(test_df, ["pref_city_district", "base_year_quater"])
-    train_df = get_agg_feature(train_df, ["pref_city", "base_year_quater"])
-    test_df = get_agg_feature(test_df, ["pref_city", "base_year_quater"])
-    train_df = get_agg_feature(train_df, ["pref", "base_year_quater"])
-    test_df = get_agg_feature(test_df, ["pref", "base_year_quater"])
-    """
-
-    # null数
-    original_columns = [
-        "都道府県名",
-        "市区町村名",
-        "地区名",
-        "最寄駅：名称",
-        "最寄駅：距離（分）",
-        "間取り",
-        "面積（㎡）",
-        "建築年",
-        "建物の構造",
-        "用途",
-        "今後の利用目的",
-        "都市計画",
-        "建ぺい率（％）",
-        "容積率（％）",
-        "改装",
-        "取引時点",
-        "取引の事情等",
+    # スケールを揃えておく
+    df["timing_code_original"] = df["timing_code"].copy()
+    numeric_cols = [
+        x for x in SelectNumerical().fit_transform(df).columns if x not in ["y", "is_train", "timing_code_original"]
     ]
-    train_df["null_num"] = train_df[original_columns].isnull().sum(axis=1)
-    test_df["null_num"] = test_df[original_columns].isnull().sum(axis=1)
+    transformer = MinMaxScaler()
+    df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
 
-    # 不要なカラム削除
-    train_df = train_df.drop(original_columns, axis=1)
-    test_df = test_df.drop(original_columns, axis=1)
-    train_df = train_df.drop(inter_cols_scaled, axis=1)
-    test_df = test_df.drop(inter_cols_scaled, axis=1)
+    # カテゴリごとの統計量
+    # group_keyにlistが入らないので準備
+    for col in ["pref_city_district", "pref_city", "pref", "station"]:
+        group_key = f"{col}_timing"
+        df[group_key] = [str(x) + "_" + str(int(y)) for x, y in zip(df[col], df["timing_code_original"])]
+        df, aggregated_cols = aggregation(
+            df, group_key=group_key, group_values=numeric_cols, agg_methods=["mean", "max", "min"]
+        )
+        del df[group_key]
+    del df["timing_code_original"]
 
-    # target encoding
-    for col in ["pref", "pref_city", "pref_city_district"]:
-        te_df = train_df.groupby([col, "base_year"])["y"].mean().reset_index(drop=False)
-        te_df = te_df.rename(columns={"y": f"te_{col}"})
-        te_df["base_year"] = te_df["base_year"] + 1
-        train_df = train_df.merge(te_df, on=[col, "base_year"], how="left")
-        test_df = test_df.merge(te_df, on=[col, "base_year"], how="left")
+    # ここからGBDT系専用の処理
+    encoder = Pipeline(
+        [
+            SelectNumerical(),
+            ArithmeticCombinations(
+                input_cols=numeric_cols,
+                drop_origin=True,
+                operator="*",
+                r=2,
+            ),
+        ]
+    )
+    encoded_df = encoder.fit_transform(df[numeric_cols])
+    df = pd.concat([df, encoded_df], axis=1)
 
     # label encoding
     category_columns = [
@@ -364,14 +312,13 @@ def preprocess(train_df, test_df):
         "reason",
     ]
     ce_oe = ce.OrdinalEncoder()
-    train_df.loc[:, category_columns] = ce_oe.fit_transform(train_df[category_columns])
-    test_df.loc[:, category_columns] = ce_oe.transform(test_df[category_columns])
-    for cat in category_columns:
-        idx = test_df[cat] == -1
-        test_df.loc[idx, cat] = 0
-    train_df[category_columns] = train_df[category_columns].astype(int)
-    test_df[category_columns] = test_df[category_columns].astype(int)
+    df.loc[:, category_columns] = ce_oe.fit_transform(df[category_columns])
+    df[category_columns] = df[category_columns].astype(int)
 
+    # 分割
+    train_df = df[df["is_train"] == 1].reset_index(drop=True)
+    test_df = df[df["is_train"] == 0].reset_index(drop=True)
+    del test_df["y"], train_df["is_train"], test_df["is_train"]
     return train_df, test_df
 
 
@@ -949,9 +896,10 @@ def fit_trainer(trainer_instance):
 if __name__ == "__main__":
     debug = False
     tprint(f"debug mode {debug}")
-
     tprint("loading data")
     (train_df, test_df, sample_submission) = get_data()
+    if debug:
+        train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
     tprint("preprocessing data")
     (train_df, test_df) = preprocess(train_df, test_df)
     tprint("reduce memory usage")
@@ -960,10 +908,8 @@ if __name__ == "__main__":
     if not debug:
         feather.write_dataframe(train_df, "./data/processed/train_df.feather")
         feather.write_dataframe(test_df, "./data/processed/test_df.feather")
-    tprint(list(train_df.columns))
-    if debug:
-        train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
-    predictors = [x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]]
+    predictors = [x for x in train_df.columns if x not in ["y"]]
+    tprint(f"predictors length is {len(predictors)}")
     first_models = {}
     if debug:
         n_splits = 2
