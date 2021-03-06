@@ -272,7 +272,9 @@ def preprocess(train_df, test_df):
     df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
 
     # カテゴリごとの統計量
-    unuse_cols = ["base_year", "base_quater", "base_quarter_sin", "base_quarter_cos", "timing_code"]
+    unuse_cols = ["null_num", "base_year", "base_quarter", "base_quarter_sin", "base_quarter_cos", "timing_code"]
+    group_values = [x for x in numeric_cols if x not in unuse_cols]
+    tprint(group_values)
     for col in ["pref_city_district", "pref_city", "pref", "station"]:
         group_key = f"{col}_timing"
         # group_keyにlistが入らないので準備
@@ -280,7 +282,7 @@ def preprocess(train_df, test_df):
         df, aggregated_cols = aggregation(
             df,
             group_key=group_key,
-            group_values=[x for x in numeric_cols if x not in unuse_cols],
+            group_values=group_values,
             agg_methods=["mean", "max", "min"],
         )
         del df[group_key]
@@ -296,50 +298,11 @@ def preprocess(train_df, test_df):
                 output_suffix="_times",
                 operator="*",
                 r=2,
-            )
+            ),
         ]
     )
     encoded_df_times = encoder.fit_transform(df[numeric_cols])
-    encoder = Pipeline(
-        [
-            SelectNumerical(),
-            ArithmeticCombinations(
-                input_cols=numeric_cols,
-                drop_origin=True,
-                output_suffix="_puls",
-                operator="+",
-                r=2,
-            )
-        ]
-    )
-    encoded_df_puls = encoder.fit_transform(df[numeric_cols])
-    encoder = Pipeline(
-        [
-            SelectNumerical(),
-            ArithmeticCombinations(
-                input_cols=numeric_cols,
-                drop_origin=True,
-                output_suffix="_minus",
-                operator="-",
-                r=2,
-            )
-        ]
-    )
-    encoded_df_minus = encoder.fit_transform(df[numeric_cols])
-    encoder = Pipeline(
-        [
-            SelectNumerical(),
-            ArithmeticCombinations(
-                input_cols=numeric_cols,
-                drop_origin=True,
-                output_suffix="_div",
-                operator="/",
-                r=2,
-            )
-        ]
-    )
-    encoded_df_div = encoder.fit_transform(df[numeric_cols])
-    df = pd.concat([df, encoded_df_times, encoded_df_puls, encoded_df_minus, encoded_df_div], axis=1)
+    df = pd.concat([df, encoded_df_times], axis=1)
 
     # label encoding
     category_columns = [
@@ -938,7 +901,7 @@ def fit_trainer(trainer_instance):
 
 
 if __name__ == "__main__":
-    debug = False
+    debug = True
     tprint(f"debug mode {debug}")
     tprint("loading data")
     (train_df, test_df, sample_submission) = get_data()
