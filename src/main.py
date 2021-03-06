@@ -901,7 +901,7 @@ def fit_trainer(trainer_instance):
 
 
 if __name__ == "__main__":
-    debug = True
+    debug = False
     tprint(f"debug mode {debug}")
     tprint("loading data")
     (train_df, test_df, sample_submission) = get_data()
