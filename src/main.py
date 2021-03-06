@@ -272,7 +272,7 @@ def preprocess(train_df, test_df):
     df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
 
     # カテゴリごとの統計量
-    unuse_cols = ["null_num", "base_year", "base_quarter", "base_quarter_sin", "base_quarter_cos", "timing_code"]
+    unuse_cols = ["base_year", "base_quarter", "base_quarter_sin", "base_quarter_cos", "timing_code"]
     group_values = [x for x in numeric_cols if x not in unuse_cols]
     tprint(group_values)
     for col in ["pref_city_district", "pref_city", "pref", "station"]:
@@ -456,7 +456,7 @@ class LGBTrainer(GroupKfoldTrainer):
             dtrain,
             valid_sets=[dtrain, dvalid],
             num_boost_round=50000,
-            early_stopping_rounds=100,
+            early_stopping_rounds=500,
             verbose_eval=1000,
         )
         ret = {}
@@ -929,7 +929,7 @@ if __name__ == "__main__":
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
-        "subsample": 0.8,
+        "subsample": 0.9,
         "colsample_bytree": 0.8,
         "device": "cpu",
         "learning_rate": 0.1,
@@ -955,7 +955,7 @@ if __name__ == "__main__":
     params = {
         "objective": "xentropy",
         "boosting_type": "gbdt",
-        "subsample": 0.8,
+        "subsample": 0.9,
         "colsample_bytree": 0.8,
         "device": "cpu",
         "learning_rate": 0.01,
