@@ -272,12 +272,18 @@ def preprocess(train_df, test_df):
     df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
 
     # カテゴリごとの統計量
-    # group_keyにlistが入らないので準備
+    unuse_cols = ["base_year", "base_quarter", "base_quarter_sin", "base_quarter_cos", "timing_code"]
+    group_values = [x for x in numeric_cols if x not in unuse_cols]
+    tprint(group_values)
     for col in ["pref_city_district", "pref_city", "pref", "station"]:
         group_key = f"{col}_timing"
+        # group_keyにlistが入らないので準備
         df[group_key] = [str(x) + "_" + str(int(y)) for x, y in zip(df[col], df["timing_code_original"])]
         df, aggregated_cols = aggregation(
-            df, group_key=group_key, group_values=numeric_cols, agg_methods=["mean", "max", "min"]
+            df,
+            group_key=group_key,
+            group_values=group_values,
+            agg_methods=["mean", "max", "min"],
         )
         del df[group_key]
     del df["timing_code_original"]
@@ -289,13 +295,14 @@ def preprocess(train_df, test_df):
             ArithmeticCombinations(
                 input_cols=numeric_cols,
                 drop_origin=True,
+                output_suffix="_times",
                 operator="*",
                 r=2,
             ),
         ]
     )
-    encoded_df = encoder.fit_transform(df[numeric_cols])
-    df = pd.concat([df, encoded_df], axis=1)
+    encoded_df_times = encoder.fit_transform(df[numeric_cols])
+    df = pd.concat([df, encoded_df_times], axis=1)
 
     # label encoding
     category_columns = [
@@ -449,7 +456,7 @@ class LGBTrainer(GroupKfoldTrainer):
             dtrain,
             valid_sets=[dtrain, dvalid],
             num_boost_round=50000,
-            early_stopping_rounds=100,
+            early_stopping_rounds=500,
             verbose_eval=1000,
         )
         ret = {}
@@ -922,7 +929,7 @@ if __name__ == "__main__":
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
-        "subsample": 0.8,
+        "subsample": 0.9,
         "colsample_bytree": 0.8,
         "device": "cpu",
         "learning_rate": 0.1,
@@ -948,7 +955,7 @@ if __name__ == "__main__":
     params = {
         "objective": "xentropy",
         "boosting_type": "gbdt",
-        "subsample": 0.8,
+        "subsample": 0.9,
         "colsample_bytree": 0.8,
         "device": "cpu",
         "learning_rate": 0.01,
