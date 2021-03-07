@@ -289,6 +289,9 @@ def preprocess(train_df, test_df):
     del df["timing_code_original"]
 
     # ここからGBDT系専用の処理
+    # NN系の処理をすることを見越してcopyしておく
+    df_nn = df.copy()
+    # 掛け算変数作成
     encoder = Pipeline(
         [
             SelectNumerical(),
@@ -322,11 +325,74 @@ def preprocess(train_df, test_df):
     df.loc[:, category_columns] = ce_oe.fit_transform(df[category_columns])
     df[category_columns] = df[category_columns].astype(int)
 
+    # ここからNN系の処理
+    # one-hot特徴作成
+    def multi_hot_encoder(df: pd.Series, sep: str) -> pd.DataFrame:
+        res = pd.DataFrame()
+        colname = df.name
+        res[colname] = pd.Series([x.split(sep) for x in df.fillna("不明")])
+        res = (
+            res.explode(colname)
+            .reset_index()
+            .pivot_table(index=["index"], columns=[colname], aggfunc=[len], fill_value=0)
+        )
+        res.columns = [colname + "_" + x[1] for x in res.columns]
+        return res.reset_index(drop=True)
+
+    onehot_columns = [
+        "plan",
+        "structure",
+        "usage",
+        "future_usage",
+        "city_plan",
+        "remodeling",
+        "reason",
+    ]
+    onehot_plan = multi_hot_encoder(df_nn["plan"], sep="＋")
+    onehot_structure = multi_hot_encoder(df_nn["structure"], sep="、")
+    onehot_usage = multi_hot_encoder(df_nn["usage"], sep="、")
+    onehot_future_usage = multi_hot_encoder(df_nn["future_usage"], sep="、")
+    onehot_city_plan = multi_hot_encoder(df_nn["city_plan"], sep="、")
+    onehot_remodeling = multi_hot_encoder(df_nn["remodeling"], sep="、")
+    onehot_reason = multi_hot_encoder(df_nn["reason"], sep="、")
+    df_nn = (
+        pd.concat(
+            [
+                df_nn,
+                onehot_plan,
+                onehot_structure,
+                onehot_usage,
+                onehot_future_usage,
+                onehot_city_plan,
+                onehot_remodeling,
+                onehot_reason,
+            ],
+            axis=1,
+        )
+        .drop(onehot_columns, axis=1)
+        .reset_index(drop=True)
+    )
+    tprint(df_nn.head())
+    df_nn
+    # label encoding
+    category_columns = ["pref", "pref_city", "pref_city_district"]
+    ce_oe = ce.OrdinalEncoder()
+    df_nn.loc[:, category_columns] = ce_oe.fit_transform(df_nn[category_columns])
+    df_nn[category_columns] = df_nn[category_columns].astype(int)
+    # fillna
+    df_nn = df_nn.fillna(0)
+
     # 分割
     train_df = df[df["is_train"] == 1].reset_index(drop=True)
     test_df = df[df["is_train"] == 0].reset_index(drop=True)
     del test_df["y"], train_df["is_train"], test_df["is_train"]
-    return train_df, test_df
+    train_df_nn = df_nn[df_nn["is_train"] == 1].reset_index(drop=True)
+    test_df_nn = df_nn[df_nn["is_train"] == 0].reset_index(drop=True)
+    del test_df_nn["y"], train_df_nn["is_train"], test_df_nn["is_train"]
+    assert train_df.shape[0] == train_df_nn.shape[0], f"{train_df.shape}, {train_df_nn.shape}"
+    assert test_df.shape[0] == test_df_nn.shape[0], f"{test_df.shape}, {test_df_nn.shape}"
+
+    return train_df, test_df, train_df_nn, test_df_nn
 
 
 class GroupKfoldTrainer(object):
@@ -908,16 +974,22 @@ if __name__ == "__main__":
     if debug:
         train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
     tprint("preprocessing data")
-    (train_df, test_df) = preprocess(train_df, test_df)
+    (train_df, test_df, train_df_nn, test_df_nn) = preprocess(train_df, test_df)
     tprint("reduce memory usage")
     train_df = reduce_mem_usage(train_df)
     test_df = reduce_mem_usage(test_df)
+    train_df_nn = reduce_mem_usage(train_df_nn)
+    test_df_nn = reduce_mem_usage(test_df_nn)
+
     if not debug:
         feather.write_dataframe(train_df, "./data/processed/train_df.feather")
         feather.write_dataframe(test_df, "./data/processed/test_df.feather")
-    predictors = [x for x in train_df.columns if x not in ["y"]]
-    tprint(f"predictors length is {len(predictors)}")
-    first_models = {}
+        # float8があるのでpickleで保存
+        with open("./data/processed/train_df_nn.pickle", "wb") as f:
+            pickle.dump(train_df_nn, f)
+        with open("./data/processed/test_df_nn.pickle", "wb") as f:
+            pickle.dump(test_df_nn, f)
+    del train_df_nn, test_df_nn
     if debug:
         n_splits = 2
         n_rsb = 1
@@ -925,6 +997,9 @@ if __name__ == "__main__":
         n_splits = 6
         n_rsb = 1
     on_colab = "google.colab" in sys.modules
+    predictors = [x for x in train_df.columns if x not in ["y"]]
+    tprint(f"predictors length is {len(predictors)}")
+    first_models = {}
     tprint("TRAIN LightGBM")
     params = {
         "objective": "mae",
@@ -1002,6 +1077,11 @@ if __name__ == "__main__":
         xgb_trainer = fit_trainer(xgb_trainer)
         first_models["xgb"] = xgb_trainer
 
+        # ここからNN
+        with open("./data/processed/train_df_nn.pickle", "rb") as f:
+            train_df = pickle.load(f)
+        with open("./data/processed/test_df_nn.pickle", "rb") as f:
+            test_df = pickle.load(f)
         tprint("TRAIN TabNet")
         predictors_nn = [
             x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]
