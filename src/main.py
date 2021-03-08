@@ -879,7 +879,7 @@ class TabNetTrainer(GroupKfoldTrainer):
                 cat_dims=[48, 619, 15419, 3833],
                 cat_emb_dim=[5, 10, 100, 50],
                 optimizer_fn=torch.optim.Adam,
-                optimizer_params=dict(lr=1e-3, weight_decay=1e-5),
+                optimizer_params=dict(lr=5e-4, weight_decay=1e-5),
                 mask_type="entmax",
                 scheduler_params=dict(mode="min", patience=5, min_lr=1e-5, factor=0.9),
                 scheduler_fn=ReduceLROnPlateau,
