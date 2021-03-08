@@ -375,7 +375,7 @@ def preprocess(train_df, test_df):
     tprint(df_nn.head())
     df_nn
     # label encoding
-    category_columns = ["pref", "pref_city", "pref_city_district"]
+    category_columns = ["pref", "pref_city", "pref_city_district", "station"]
     ce_oe = ce.OrdinalEncoder()
     df_nn.loc[:, category_columns] = ce_oe.fit_transform(df_nn[category_columns])
     df_nn[category_columns] = df_nn[category_columns].astype(int)
@@ -583,21 +583,21 @@ class MLPModel(nn.Module):
             # nn.Dropout(dropout_rate),
         )
         self.emb_city = nn.Sequential(
-            nn.Embedding(num_embeddings=619, embedding_dim=city_dim),
+            nn.Embedding(num_embeddings=618, embedding_dim=city_dim),
             # nn.Linear(city_dim, city_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(city_dim),
             # nn.Dropout(dropout_rate),
         )
         self.emb_district = nn.Sequential(
-            nn.Embedding(num_embeddings=15419, embedding_dim=district_dim),
+            nn.Embedding(num_embeddings=15449, embedding_dim=district_dim),
             # nn.Linear(district_dim, district_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(district_dim),
             # nn.Dropout(dropout_rate),
         )
         self.emb_station = nn.Sequential(
-            nn.Embedding(num_embeddings=3833, embedding_dim=station_dim),
+            nn.Embedding(num_embeddings=3841, embedding_dim=station_dim),
             # nn.Linear(station_dim, station_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(station_dim),
@@ -642,27 +642,12 @@ class MLPTrainer(GroupKfoldTrainer):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.categorical_cols = categorical_cols
         self.numeric_cols = [x for x in predictors if x not in categorical_cols]
-        _X, _test = self.preprocess(X, test, self.numeric_cols)
         self.params = params
         super().__init__(state_path, predictors, target_col, _X, groups, _test, n_splits, n_rsb)
 
     def _get_importance(self, model, importance_type="gain"):
         importance = pd.DataFrame({"features": [], "importance": []})
         return importance
-
-    @staticmethod
-    def preprocess(train_df: pd.DataFrame, test_df: pd.DataFrame, numeric_cols: List[str]):
-        # -1埋め
-        train_df[numeric_cols] = train_df[numeric_cols].fillna(-1)
-        test_df[numeric_cols] = test_df[numeric_cols].fillna(-1)
-
-        tprint("scaling...")
-        transformer = MinMaxScaler()
-        # transformer = RobustScaler()
-        train_df[numeric_cols] = transformer.fit_transform(train_df[numeric_cols])
-        test_df[numeric_cols] = transformer.transform(test_df[numeric_cols])
-        gc.collect()
-        return train_df, test_df
 
     def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
         set_seed(loop_seed)
@@ -849,21 +834,6 @@ class TabNetTrainer(GroupKfoldTrainer):
             self.params = {}
         else:
             self.params = params
-        self.X, self.test = self.preprocess(X, test)
-
-    def preprocess(self, train_df: pd.DataFrame, test_df: pd.DataFrame):
-        # -1埋め
-        train_df[self.numeric_cols] = train_df[self.numeric_cols].fillna(-1)
-        test_df[self.numeric_cols] = test_df[self.numeric_cols].fillna(-1)
-
-        tprint("scaling...")
-        transformer = MinMaxScaler()
-        # transformer = RobustScaler()
-        train_df[self.numeric_cols] = transformer.fit_transform(train_df[self.numeric_cols])
-        test_df[self.numeric_cols] = transformer.transform(test_df[self.numeric_cols])
-
-        gc.collect()
-        return train_df, test_df
 
     def _get_default_params(self):
         return dict(
@@ -876,7 +846,7 @@ class TabNetTrainer(GroupKfoldTrainer):
                 n_steps=2,
                 gamma=1.3,
                 cat_idxs=self.categorical_idx,
-                cat_dims=[48, 619, 15419, 3833],
+                cat_dims=[48, 618, 15449, 3841],
                 cat_emb_dim=[5, 10, 100, 50],
                 optimizer_fn=torch.optim.Adam,
                 optimizer_params=dict(lr=5e-4, weight_decay=1e-5),
