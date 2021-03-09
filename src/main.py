@@ -643,7 +643,7 @@ class MLPTrainer(GroupKfoldTrainer):
         self.categorical_cols = categorical_cols
         self.numeric_cols = [x for x in predictors if x not in categorical_cols]
         self.params = params
-        super().__init__(state_path, predictors, target_col, _X, groups, _test, n_splits, n_rsb)
+        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
 
     def _get_importance(self, model, importance_type="gain"):
         importance = pd.DataFrame({"features": [], "importance": []})
