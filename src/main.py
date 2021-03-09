@@ -522,7 +522,7 @@ class LGBTrainer(GroupKfoldTrainer):
             dtrain,
             valid_sets=[dtrain, dvalid],
             num_boost_round=50000,
-            early_stopping_rounds=500,
+            early_stopping_rounds=100,
             verbose_eval=1000,
         )
         ret = {}
