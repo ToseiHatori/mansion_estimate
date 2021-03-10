@@ -294,7 +294,15 @@ def preprocess(train_df, test_df):
     # NN系の処理をすることを見越してcopyしておく
     df_nn = df.copy()
     # 掛け算変数作成
-    numeric_cols_times = ["area", "year_of_construction", "passed_year", "time_to_station", "floor_area_ratio", "base_year"]
+    numeric_cols_times = [
+        "area",
+        "year_of_construction",
+        "passed_year",
+        "time_to_station",
+        "floor_area_ratio",
+        "base_year",
+        "ID"
+    ]
     encoder = Pipeline(
         [
             SelectNumerical(),
@@ -992,7 +1000,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     lgb_trainer = fit_trainer(lgb_trainer)
     tprint(f"LGBM SCORE IS {np.mean(lgb_trainer.validation_score):.4f}")
@@ -1018,7 +1026,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district"],
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     xent_trainer = fit_trainer(xent_trainer)
     tprint(f"XENT SCORE IS {np.mean(xent_trainer.validation_score):.4f}")
