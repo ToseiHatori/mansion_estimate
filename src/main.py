@@ -294,11 +294,13 @@ def preprocess(train_df, test_df):
     # NN系の処理をすることを見越してcopyしておく
     df_nn = df.copy()
     # 掛け算変数作成
+    unuse_cols = ["base_quarter", "timing_code", "null_num", "plan_num"]
+    numeric_cols_times = [x for x in numeric_cols if x not in unuse_cols]
     encoder = Pipeline(
         [
             SelectNumerical(),
             ArithmeticCombinations(
-                input_cols=numeric_cols,
+                input_cols=numeric_cols_times,
                 drop_origin=True,
                 output_suffix="_times",
                 operator="*",
