@@ -257,14 +257,14 @@ def preprocess(train_df, test_df):
     df["base_quarter"] = [int(x[6:7]) for x in df["取引時点"]]
     df["timing_code"] = [y + (4 * (x - 2005)) for x, y in zip(df["base_year"], df["base_quarter"])]
     # sin, cos
-    x = 2 * np.pi * (df["base_quarter"] / max(df["base_quarter"]))
-    df["base_quarter_sin"] = np.sin(x)
-    df["base_quarter_cos"] = np.cos(x)
+    # x = 2 * np.pi * (df["base_quarter"] / max(df["base_quarter"]))
+    # df["base_quarter_sin"] = np.sin(x)
+    # df["base_quarter_cos"] = np.cos(x)
     df["passed_year"] = df["base_year"] - df["year_of_construction"]
     del df["取引時点"]
 
     # スケールを揃えておく
-    df["timing_code_original"] = df["timing_code"].copy()
+    # df["timing_code_original"] = df["timing_code"].copy()
     numeric_cols = [
         x for x in SelectNumerical().fit_transform(df).columns if x not in ["y", "is_train", "timing_code_original"]
     ]
@@ -374,8 +374,7 @@ def preprocess(train_df, test_df):
         .drop(onehot_columns, axis=1)
         .reset_index(drop=True)
     )
-    tprint(df_nn.head())
-    df_nn
+
     # label encoding
     category_columns = ["pref", "pref_city", "pref_city_district", "station"]
     ce_oe = ce.OrdinalEncoder()
@@ -524,7 +523,7 @@ class LGBTrainer(GroupKfoldTrainer):
             dtrain,
             valid_sets=[dtrain, dvalid],
             num_boost_round=50000,
-            early_stopping_rounds=500,
+            early_stopping_rounds=100,
             verbose_eval=1000,
         )
         ret = {}
