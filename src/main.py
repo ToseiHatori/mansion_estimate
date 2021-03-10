@@ -272,7 +272,7 @@ def preprocess(train_df, test_df):
     df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
 
     # カテゴリごとの統計量
-    unuse_cols = ["base_year", "base_quarter", "base_quarter_sin", "base_quarter_cos", "timing_code"]
+    unuse_cols = ["base_year", "base_quarter", "base_quarter_sin", "base_quarter_cos", "timing_code", "ID"]
     group_values = [x for x in numeric_cols if x not in unuse_cols]
     tprint(group_values)
     for col in ["pref_city_district", "pref_city", "pref", "station"]:
@@ -283,7 +283,7 @@ def preprocess(train_df, test_df):
             df,
             group_key=group_key,
             group_values=group_values,
-            agg_methods=["mean", "max", "min"],
+            agg_methods=["mean"],
         )
         del df[group_key]
     del df["timing_code_original"]
@@ -522,7 +522,7 @@ class LGBTrainer(GroupKfoldTrainer):
             dtrain,
             valid_sets=[dtrain, dvalid],
             num_boost_round=50000,
-            early_stopping_rounds=100,
+            early_stopping_rounds=500,
             verbose_eval=1000,
         )
         ret = {}
@@ -810,7 +810,7 @@ class XGBTrainer(GroupKfoldTrainer):
             evals=[(dtrain, "train"), (dvalid, "valid")],
             num_boost_round=100000,
             early_stopping_rounds=100,
-            verbose_eval=100,
+            verbose_eval=1000,
         )
         ret = {}
         ret["model"] = model
