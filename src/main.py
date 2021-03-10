@@ -272,6 +272,7 @@ def preprocess(train_df, test_df):
     df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
 
     # カテゴリごとの統計量
+    """
     unuse_cols = ["base_year", "base_quarter", "base_quarter_sin", "base_quarter_cos", "timing_code", "ID"]
     group_values = [x for x in numeric_cols if x not in unuse_cols]
     tprint(group_values)
@@ -287,6 +288,7 @@ def preprocess(train_df, test_df):
         )
         del df[group_key]
     del df["timing_code_original"]
+    """
 
     # ここからGBDT系専用の処理
     # NN系の処理をすることを見越してcopyしておく
