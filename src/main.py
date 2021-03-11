@@ -256,39 +256,19 @@ def preprocess(train_df, test_df):
     df["base_year"] = [int(x[0:4]) for x in df["取引時点"]]
     df["base_quarter"] = [int(x[6:7]) for x in df["取引時点"]]
     df["timing_code"] = [y + (4 * (x - 2005)) for x, y in zip(df["base_year"], df["base_quarter"])]
-    # sin, cos
-    # x = 2 * np.pi * (df["base_quarter"] / max(df["base_quarter"]))
-    # df["base_quarter_sin"] = np.sin(x)
-    # df["base_quarter_cos"] = np.cos(x)
     df["passed_year"] = df["base_year"] - df["year_of_construction"]
+    df["base_year_half"] = [
+        int(str(x) + str(1 if int(y) in [1, 2] else 2)) for x, y in zip(df["base_year"], df["base_quarter"])
+    ]
+    df["base_half"] = [1 if int(y) in [1, 2] else 2 for y in df["base_quarter"]]
     del df["取引時点"]
 
     # スケールを揃えておく
-    # df["timing_code_original"] = df["timing_code"].copy()
     numeric_cols = [
-        x for x in SelectNumerical().fit_transform(df).columns if x not in ["y", "is_train", "timing_code_original"]
+        x for x in SelectNumerical().fit_transform(df).columns if x not in ["y", "is_train", "base_year_half"]
     ]
     transformer = MinMaxScaler()
     df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
-
-    # カテゴリごとの統計量
-    """
-    unuse_cols = ["base_year", "base_quarter", "base_quarter_sin", "base_quarter_cos", "timing_code", "ID"]
-    group_values = [x for x in numeric_cols if x not in unuse_cols]
-    tprint(group_values)
-    for col in ["pref_city_district", "pref_city", "pref", "station"]:
-        group_key = f"{col}_timing"
-        # group_keyにlistが入らないので準備
-        df[group_key] = [str(x) + "_" + str(int(y)) for x, y in zip(df[col], df["timing_code_original"])]
-        df, aggregated_cols = aggregation(
-            df,
-            group_key=group_key,
-            group_values=group_values,
-            agg_methods=["mean"],
-        )
-        del df[group_key]
-    del df["timing_code_original"]
-    """
 
     # ここからGBDT系専用の処理
     # NN系の処理をすることを見越してcopyしておく
@@ -393,10 +373,10 @@ def preprocess(train_df, test_df):
     df_nn = df_nn.fillna(0)
 
     # 分割
-    train_df = df[df["is_train"] == 1].reset_index(drop=True)
+    train_df = df[(df["is_train"] == 1) & (df["base_year_half"] < 20192)].reset_index(drop=True)
     test_df = df[df["is_train"] == 0].reset_index(drop=True)
     del test_df["y"], train_df["is_train"], test_df["is_train"]
-    train_df_nn = df_nn[df_nn["is_train"] == 1].reset_index(drop=True)
+    train_df_nn = df_nn[(df_nn["is_train"] == 1) & (df["base_year_half"] < 20192)].reset_index(drop=True)
     test_df_nn = df_nn[df_nn["is_train"] == 0].reset_index(drop=True)
     del test_df_nn["y"], train_df_nn["is_train"], test_df_nn["is_train"]
     assert train_df.shape[0] == train_df_nn.shape[0], f"{train_df.shape}, {train_df_nn.shape}"
@@ -448,6 +428,9 @@ class GroupKfoldTrainer(object):
     def fit(self):
         gf = GroupKFold(n_splits=self.n_splits)
         for fold_cnt, (train_idx, valid_idx) in enumerate(gf.split(self.X, None, self.groups)):
+            if set(self.X.loc[valid_idx, "base_year_half"]) != set([20191]):
+                continue
+
             fold_cnt += 1
             self.fold_cnt = fold_cnt
             tprint(f"START FOLD {fold_cnt}")
@@ -455,8 +438,9 @@ class GroupKfoldTrainer(object):
             # DataFrame -> train, valid
             X_train, X_valid = self.X.loc[train_idx, self.predictors], self.X.loc[valid_idx, self.predictors]
             Y_train, Y_valid = self.X.loc[train_idx, self.target_col], self.X.loc[valid_idx, self.target_col]
-            tprint(f"training years : {set(self.X.loc[train_idx, 'base_year'])}")
-            tprint(f"validation years : {set(self.X.loc[valid_idx, 'base_year'])}")
+            tprint(f"training years : {set(self.X.loc[train_idx, 'base_year_half'])}")
+            tprint(f"validation years : {set(self.X.loc[valid_idx, 'base_year_half'])}")
+            self.valid_idx = valid_idx
 
             # random seed blending
             for rsb_idx in range(self.n_rsb):
@@ -492,7 +476,8 @@ class GroupKfoldTrainer(object):
         cv_score = np.mean(self.validation_score, axis=0)
         cv_std = np.std(self.validation_score, axis=0)
         tprint(f"TOTAL CV  SCORE is : {cv_score:.6f} +- {cv_std:.4f}")
-        oof_score = self.loss_(self.oof, self.X.loc[:, self.target_col])
+        self.oof = self.oof[self.valid_idx]
+        oof_score = self.loss_(self.oof, self.X.loc[self.valid_idx, self.target_col])
         tprint(f"TOTAL OOF SCORE is : {oof_score:.6f}")
         tprint("----終わり----\n")
 
@@ -859,9 +844,9 @@ class TabNetTrainer(GroupKfoldTrainer):
                 cat_dims=[48, 619, 15457, 3844],
                 cat_emb_dim=[10, 100, 1000, 100],
                 optimizer_fn=torch.optim.Adam,
-                optimizer_params=dict(lr=5e-4, weight_decay=1e-5),
+                optimizer_params=dict(lr=1e-3),
                 mask_type="entmax",
-                scheduler_params=dict(mode="min", patience=5, min_lr=1e-5, factor=0.9),
+                scheduler_params=dict(mode="min", patience=10, min_lr=1e-6, factor=0.1),
                 scheduler_fn=ReduceLROnPlateau,
                 seed=42,
                 verbose=10,
@@ -947,12 +932,12 @@ def fit_trainer(trainer_instance):
 
 
 if __name__ == "__main__":
-    debug = False
+    debug = True
     tprint(f"debug mode {debug}")
     tprint("loading data")
     (train_df, test_df, sample_submission) = get_data()
     if debug:
-        train_df = train_df.sample(1000, random_state=100).reset_index(drop=True)
+        train_df = train_df.sample(10000, random_state=100).reset_index(drop=True)
     tprint("preprocessing data")
     (train_df, test_df, train_df_nn, test_df_nn) = preprocess(train_df, test_df)
     tprint("reduce memory usage")
@@ -970,11 +955,11 @@ if __name__ == "__main__":
         with open("./data/processed/test_df_nn.pickle", "wb") as f:
             pickle.dump(test_df_nn, f)
     del train_df_nn, test_df_nn
+    max_fold = len(set(train_df["base_year_half"]))
+    n_splits = max_fold
     if debug:
-        n_splits = 2
         n_rsb = 1
     else:
-        n_splits = 6
         n_rsb = 3
     on_colab = "google.colab" in sys.modules
     predictors = [x for x in train_df.columns if x not in ["y"]]
@@ -995,7 +980,7 @@ if __name__ == "__main__":
         predictors=predictors,
         target_col="y",
         X=train_df,
-        groups=train_df["base_year"],
+        groups=train_df["base_year_half"],
         test=test_df,
         n_splits=n_splits,
         n_rsb=n_rsb,
@@ -1021,7 +1006,7 @@ if __name__ == "__main__":
         predictors=predictors,
         target_col="y",
         X=train_df,
-        groups=train_df["base_year"],
+        groups=train_df["base_year_half"],
         test=test_df,
         n_splits=n_splits,
         n_rsb=n_rsb,
@@ -1047,7 +1032,7 @@ if __name__ == "__main__":
             predictors=predictors,
             target_col="y",
             X=train_df,
-            groups=train_df["base_year"],
+            groups=train_df["base_year_half"],
             test=test_df,
             n_splits=n_splits,
             n_rsb=1,
@@ -1070,7 +1055,7 @@ if __name__ == "__main__":
             predictors=predictors,
             target_col="y",
             X=train_df,
-            groups=train_df["base_year"],
+            groups=train_df["base_year_half"],
             test=test_df,
             n_splits=n_splits,
             n_rsb=1,
@@ -1086,7 +1071,7 @@ if __name__ == "__main__":
             predictors=predictors,
             target_col="y",
             X=train_df,
-            groups=train_df["base_year"],
+            groups=train_df["base_year_half"],
             test=test_df,
             n_splits=n_splits,
             n_rsb=1,
@@ -1103,20 +1088,25 @@ if __name__ == "__main__":
         mlp_trainer = fit_trainer(mlp_trainer)
         first_models["mlp"] = mlp_trainer
 
-        # blending
+    # blending
+    if not debug:
         stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, tab_trainer.oof, mlp_trainer.oof]
         stage2_preds = [lgb_trainer.pred, xent_trainer.pred, xgb_trainer.pred, tab_trainer.pred, mlp_trainer.pred]
-        best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
-        best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
-        tprint("post processed optimized weight", best_weights)
-        oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
-        blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
-        tprint("final oof score", mean_absolute_error(train_df["y"].values, oof_preds))
-        tprint("writing result...")
+    else:
+        stage2_oofs = [lgb_trainer.oof, xent_trainer.oof]
+        stage2_preds = [lgb_trainer.pred, xent_trainer.pred]
+    best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
+    best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
+    tprint("post processed optimized weight", best_weights)
+    oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
+    blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
+    tprint("final oof score", mean_absolute_error(train_df.loc[lgb_trainer.valid_idx, "y"].values, oof_preds))
+    tprint("writing result...")
+
+    if not debug:
         with open("./models/final_oof_and_pred.pickle", "wb") as f:
             pickle.dump([oof_preds, blend_preds], f)
-
         # submit
         sample_submission["取引価格（総額）_log"] = blend_preds
-        sample_submission.to_csv("./submit.csv", index=False)
-        tprint("---おわり---")
+    sample_submission.to_csv("./submit.csv", index=False)
+    tprint("---おわり---")
