@@ -593,21 +593,21 @@ class MLPModel(nn.Module):
             # nn.Dropout(dropout_rate),
         )
         self.emb_city = nn.Sequential(
-            nn.Embedding(num_embeddings=618, embedding_dim=city_dim),
+            nn.Embedding(num_embeddings=619, embedding_dim=city_dim),
             # nn.Linear(city_dim, city_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(city_dim),
             # nn.Dropout(dropout_rate),
         )
         self.emb_district = nn.Sequential(
-            nn.Embedding(num_embeddings=15449, embedding_dim=district_dim),
+            nn.Embedding(num_embeddings=15457, embedding_dim=district_dim),
             # nn.Linear(district_dim, district_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(district_dim),
             # nn.Dropout(dropout_rate),
         )
         self.emb_station = nn.Sequential(
-            nn.Embedding(num_embeddings=3841, embedding_dim=station_dim),
+            nn.Embedding(num_embeddings=3844, embedding_dim=station_dim),
             # nn.Linear(station_dim, station_dim),
             # nn.PReLU(),
             # nn.BatchNorm1d(station_dim),
@@ -856,8 +856,8 @@ class TabNetTrainer(GroupKfoldTrainer):
                 n_steps=2,
                 gamma=1.3,
                 cat_idxs=self.categorical_idx,
-                cat_dims=[48, 618, 15449, 3841],
-                cat_emb_dim=[5, 10, 100, 50],
+                cat_dims=[48, 619, 15457, 3844],
+                cat_emb_dim=[10, 100, 1000, 100],
                 optimizer_fn=torch.optim.Adam,
                 optimizer_params=dict(lr=5e-4, weight_decay=1e-5),
                 mask_type="entmax",
