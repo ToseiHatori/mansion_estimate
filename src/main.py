@@ -301,7 +301,7 @@ def preprocess(train_df, test_df):
         "time_to_station",
         "floor_area_ratio",
         "base_year",
-        "ID"
+        "ID",
     ]
     encoder = Pipeline(
         [
@@ -1063,18 +1063,11 @@ if __name__ == "__main__":
         with open("./data/processed/test_df_nn.pickle", "rb") as f:
             test_df = pickle.load(f)
         tprint("TRAIN TabNet")
-        predictors_nn = [
-            x for x in train_df.columns if x not in ["y", "te_pref", "te_pref_city", "te_pref_city_district"]
-        ]
-        predictors_nn = [x for x in predictors_nn if "scaled" not in x]
-        predictors_nn = [x for x in predictors_nn if re.search("_p_", x) is None]
-        predictors_nn = [x for x in predictors_nn if re.search("_m_", x) is None]
-        predictors_nn = [x for x in predictors_nn if re.search("_d_", x) is None]
-        predictors_nn = [x for x in predictors_nn if re.search("_x_", x) is None]
+        predictors = [x for x in train_df.columns if x not in ["y"]]
 
         tab_trainer = TabNetTrainer(
             state_path="./models",
-            predictors=predictors_nn,
+            predictors=predictors,
             target_col="y",
             X=train_df,
             groups=train_df["base_year"],
@@ -1090,7 +1083,7 @@ if __name__ == "__main__":
         tprint("TRAIN NN")
         mlp_trainer = MLPTrainer(
             state_path="./models",
-            predictors=predictors_nn,
+            predictors=predictors,
             target_col="y",
             X=train_df,
             groups=train_df["base_year"],
