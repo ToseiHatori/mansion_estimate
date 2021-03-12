@@ -968,6 +968,7 @@ if __name__ == "__main__":
     params = {
         "objective": "xentropy",
         "boosting_type": "gbdt",
+        "metric": "mae",
         "subsample": 0.9,
         "colsample_bytree": 0.8,
         "device": "cpu",
