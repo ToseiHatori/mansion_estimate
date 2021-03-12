@@ -170,9 +170,6 @@ def get_data():
 
 @Cache("./cache")
 def preprocess(train_df, test_df):
-    # 10万円以下の物件を除外
-    train_df = train_df[train_df["取引価格（総額）_log"] >= 5].reset_index(drop=True)
-
     # 結合
     train_df["is_train"] = 1
     test_df["is_train"] = 0
