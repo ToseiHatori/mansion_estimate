@@ -191,6 +191,14 @@ def preprocess(train_df, test_df):
     df["pref_city_district"] = df["都道府県名"] + df["市区町村名"] + df["地区名"]
     del df["都道府県名"], df["市区町村名"], df["地区名"]
 
+    # 緯度経度
+    lat_lon = pd.read_csv("./data/external/lat_lon.csv")
+    lat_lon.columns = ["pref_city_district", "lon", "lat"]
+    df = df.merge(lat_lon, on="pref_city_district", how="left")
+    df["lat_x_lon"] = df["lat"] * df["lon"]
+    df["lat_to_lon"] = (df["lat"] ** 2) + (df["lon"] ** 2)
+    df["lat_to_lon"] = [x ** 0.5 for x in df["lat_to_lon"]]
+
     # 駅関係を取得
     df["station"] = df["最寄駅：名称"]
     df["最寄駅：距離（分）"] = [x if x != "1H30?2H" else "105" for x in df["最寄駅：距離（分）"]]
@@ -256,14 +264,15 @@ def preprocess(train_df, test_df):
     df["passed_year"] = df["base_year"] - df["year_of_construction"]
     del df["取引時点"]
 
-    # スケールを揃えておく
-    numeric_cols = [x for x in SelectNumerical().fit_transform(df).columns if x not in ["y", "is_train"]]
-    transformer = MinMaxScaler()
-    df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
-
     # ここからGBDT系専用の処理
     # NN系の処理をすることを見越してcopyしておく
     df_nn = df.copy()
+    # 掛け算変数
+    # df["areayear_of_construction_times"] = df["area"] * df["year_of_construction"]
+    # df["areafloor_area_ratio_times"] = df["area"] * df["floor_area_ratio"]
+    # df["passed_yeartime_to_station_times"] = df["passed_year"] * df["time_to_station"]
+    # df["areabase_year_times"] = df["area"] * df["base_year"]
+
     # label encoding
     category_columns = [
         "pref",
@@ -283,6 +292,10 @@ def preprocess(train_df, test_df):
     df[category_columns] = df[category_columns].astype(int)
 
     # ここからNN系の処理
+    # スケールを揃えておく
+    numeric_cols = [x for x in SelectNumerical().fit_transform(df_nn).columns if x not in ["y", "is_train"]]
+    transformer = MinMaxScaler()
+    df_nn[numeric_cols] = transformer.fit_transform(df_nn[numeric_cols])
     # one-hot特徴作成
     def multi_hot_encoder(df: pd.Series, sep: str) -> pd.DataFrame:
         res = pd.DataFrame()
@@ -347,6 +360,25 @@ def preprocess(train_df, test_df):
     del test_df_nn["y"], train_df_nn["is_train"], test_df_nn["is_train"]
     assert train_df.shape[0] == train_df_nn.shape[0], f"{train_df.shape}, {train_df_nn.shape}"
     assert test_df.shape[0] == test_df_nn.shape[0], f"{test_df.shape}, {test_df_nn.shape}"
+
+    # 不要なカラム削除
+    def get_unuse_cols(df: pd.DataFrame, th: float) -> List[str]:
+        unuse_cols = []
+        numeric_cols = [x for x in SelectNumerical().fit_transform(df).columns if x not in ["y"]]
+        for col in numeric_cols:
+            std_values = df[col].std()
+            if std_values <= th:
+                unuse_cols.append(col)
+                tprint(f"{col} has std={std_values}")
+        return unuse_cols
+
+    unuse_cols = get_unuse_cols(train_df, 0.01)
+    train_df = train_df.drop(unuse_cols, axis=1).reset_index(drop=True)
+    test_df = test_df.drop(unuse_cols, axis=1).reset_index(drop=True)
+
+    unuse_cols = get_unuse_cols(train_df_nn, 0.01)
+    train_df_nn = train_df_nn.drop(unuse_cols, axis=1).reset_index(drop=True)
+    test_df_nn = test_df_nn.drop(unuse_cols, axis=1).reset_index(drop=True)
 
     return train_df, test_df, train_df_nn, test_df_nn
 
