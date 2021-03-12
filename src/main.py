@@ -834,12 +834,12 @@ class TabNetTrainer(GroupKfoldTrainer):
     def _get_default_params(self):
         return dict(
             loss_fn="mae",
-            max_epoch=100,
+            max_epoch=300,
             batch_size=1024,
             initialize_params=dict(
-                n_d=8,
-                n_a=8,
-                n_steps=2,
+                n_d=16,
+                n_a=16,
+                n_steps=3,
                 gamma=1.3,
                 cat_idxs=self.categorical_idx,
                 cat_dims=[48, 619, 15457, 3844],
