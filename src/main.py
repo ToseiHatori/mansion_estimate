@@ -376,7 +376,7 @@ def preprocess(train_df, test_df):
     train_df = df[(df["is_train"] == 1) & (df["base_year_half"] < 20192)].reset_index(drop=True)
     test_df = df[df["is_train"] == 0].reset_index(drop=True)
     del test_df["y"], train_df["is_train"], test_df["is_train"]
-    train_df_nn = df_nn[(df_nn["is_train"] == 1) & (df["base_year_half"] < 20192)].reset_index(drop=True)
+    train_df_nn = df_nn[(df_nn["is_train"] == 1) & (df_nn["base_year_half"] < 20192)].reset_index(drop=True)
     test_df_nn = df_nn[df_nn["is_train"] == 0].reset_index(drop=True)
     del test_df_nn["y"], train_df_nn["is_train"], test_df_nn["is_train"]
     assert train_df.shape[0] == train_df_nn.shape[0], f"{train_df.shape}, {train_df_nn.shape}"
@@ -396,7 +396,7 @@ class GroupKfoldTrainer(object):
         self.n_splits = n_splits
         self.n_rsb = n_rsb
         self.oof = np.zeros(len(X))
-        self.pred = np.zeros(len(test))
+        self.pred = []
         self.validation_score = []
         self.folds = []
         self.state_path = Path(state_path)
@@ -460,7 +460,7 @@ class GroupKfoldTrainer(object):
 
                 # 格納
                 self.oof[valid_idx] += pred_oof / self.n_rsb
-                self.pred += pred_test / (self.n_splits * self.n_rsb)
+                self.pred.append(pred_test)
 
                 # single fold validation　score
                 _validation_score = self.loss_(pred_oof, Y_valid.values)
@@ -470,6 +470,7 @@ class GroupKfoldTrainer(object):
             _validation_score = self.loss_(self.oof[valid_idx], Y_valid.values)
             self.validation_score.append(_validation_score)
             tprint(f"     END FOLD {fold_cnt} WITH {_validation_score:.6f}")
+            self.pred = np.mean(self.pred, axis=0)
             tprint("----切り取り----\n")
 
         # validation score of fold mean
@@ -932,7 +933,7 @@ def fit_trainer(trainer_instance):
 
 
 if __name__ == "__main__":
-    debug = False
+    debug = True
     tprint(f"debug mode {debug}")
     tprint("loading data")
     (train_df, test_df, sample_submission) = get_data()
@@ -1048,7 +1049,7 @@ if __name__ == "__main__":
         with open("./data/processed/test_df_nn.pickle", "rb") as f:
             test_df = pickle.load(f)
         tprint("TRAIN TabNet")
-        predictors = [x for x in train_df.columns if x not in ["y"]]
+        predictors = [x for x in train_df.columns if x not in ["y", "base_year_half"]]
 
         tab_trainer = TabNetTrainer(
             state_path="./models",
@@ -1108,5 +1109,5 @@ if __name__ == "__main__":
                 pickle.dump([oof_preds, blend_preds], f)
             # submit
             sample_submission["取引価格（総額）_log"] = blend_preds
-        sample_submission.to_csv("./submit.csv", index=False)
+            sample_submission.to_csv("./submit.csv", index=False)
         tprint("---おわり---")
