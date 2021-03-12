@@ -254,16 +254,10 @@ def preprocess(train_df, test_df):
     df["base_quarter"] = [int(x[6:7]) for x in df["取引時点"]]
     df["timing_code"] = [y + (4 * (x - 2005)) for x, y in zip(df["base_year"], df["base_quarter"])]
     df["passed_year"] = df["base_year"] - df["year_of_construction"]
-    df["base_year_half"] = [
-        int(str(x) + str(1 if int(y) in [1, 2] else 2)) for x, y in zip(df["base_year"], df["base_quarter"])
-    ]
-    df["base_half"] = [1 if int(y) in [1, 2] else 2 for y in df["base_quarter"]]
     del df["取引時点"]
 
     # スケールを揃えておく
-    numeric_cols = [
-        x for x in SelectNumerical().fit_transform(df).columns if x not in ["y", "is_train", "base_year_half"]
-    ]
+    numeric_cols = [x for x in SelectNumerical().fit_transform(df).columns if x not in ["y", "is_train"]]
     transformer = MinMaxScaler()
     df[numeric_cols] = transformer.fit_transform(df[numeric_cols])
 
@@ -345,10 +339,10 @@ def preprocess(train_df, test_df):
     df_nn = df_nn.fillna(0)
 
     # 分割
-    train_df = df[(df["is_train"] == 1) & (df["base_year_half"] < 20192)].reset_index(drop=True)
+    train_df = df[(df["is_train"] == 1)].reset_index(drop=True)
     test_df = df[df["is_train"] == 0].reset_index(drop=True)
     del test_df["y"], train_df["is_train"], test_df["is_train"]
-    train_df_nn = df_nn[(df_nn["is_train"] == 1) & (df_nn["base_year_half"] < 20192)].reset_index(drop=True)
+    train_df_nn = df_nn[(df_nn["is_train"] == 1)].reset_index(drop=True)
     test_df_nn = df_nn[df_nn["is_train"] == 0].reset_index(drop=True)
     del test_df_nn["y"], train_df_nn["is_train"], test_df_nn["is_train"]
     assert train_df.shape[0] == train_df_nn.shape[0], f"{train_df.shape}, {train_df_nn.shape}"
@@ -400,9 +394,6 @@ class GroupKfoldTrainer(object):
     def fit(self):
         gf = GroupKFold(n_splits=self.n_splits)
         for fold_cnt, (train_idx, valid_idx) in enumerate(gf.split(self.X, None, self.groups)):
-            if set(self.X.loc[valid_idx, "base_year_half"]) != set([20191]):
-                continue
-
             fold_cnt += 1
             self.fold_cnt = fold_cnt
             tprint(f"START FOLD {fold_cnt}")
@@ -410,8 +401,8 @@ class GroupKfoldTrainer(object):
             # DataFrame -> train, valid
             X_train, X_valid = self.X.loc[train_idx, self.predictors], self.X.loc[valid_idx, self.predictors]
             Y_train, Y_valid = self.X.loc[train_idx, self.target_col], self.X.loc[valid_idx, self.target_col]
-            tprint(f"training years : {set(self.X.loc[train_idx, 'base_year_half'])}")
-            tprint(f"validation years : {set(self.X.loc[valid_idx, 'base_year_half'])}")
+            tprint(f"training years : {set(self.X.loc[train_idx, 'base_year'])}")
+            tprint(f"validation years : {set(self.X.loc[valid_idx, 'base_year'])}")
             self.valid_idx = valid_idx
 
             # random seed blending
@@ -496,8 +487,8 @@ class LGBTrainer(GroupKfoldTrainer):
         ret = {}
         ret["model"] = model
         ret["importance"] = self._get_importance(model, importance_type="gain")
-        tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
-        tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
+        if (self.params["random_seed"] == 0) and (self.fold_cnt == 1):
+            tprint(f'importance(TOP30): {ret["importance"].sort_values(by="importance", ascending=False).head(30)}')
         return ret
 
     def _predict(self, model, X):
@@ -905,7 +896,7 @@ def fit_trainer(trainer_instance):
 
 
 if __name__ == "__main__":
-    debug = False
+    debug = True
     tprint(f"debug mode {debug}")
     tprint("loading data")
     (train_df, test_df, sample_submission) = get_data()
@@ -928,8 +919,7 @@ if __name__ == "__main__":
         with open("./data/processed/test_df_nn.pickle", "wb") as f:
             pickle.dump(test_df_nn, f)
     del train_df_nn, test_df_nn
-    max_fold = len(set(train_df["base_year_half"]))
-    n_splits = max_fold
+    n_splits = 6
     if debug:
         n_rsb = 1
     else:
@@ -937,7 +927,7 @@ if __name__ == "__main__":
     on_colab = "google.colab" in sys.modules
     predictors = [x for x in train_df.columns if x not in ["y"]]
     tprint(f"predictors length is {len(predictors)}")
-    first_models = {}
+
     tprint("TRAIN LightGBM")
     params = {
         "objective": "mae",
@@ -953,7 +943,7 @@ if __name__ == "__main__":
         predictors=predictors,
         target_col="y",
         X=train_df,
-        groups=train_df["base_year_half"],
+        groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
         n_rsb=n_rsb,
@@ -962,34 +952,6 @@ if __name__ == "__main__":
     )
     lgb_trainer = fit_trainer(lgb_trainer)
     tprint(f"LGBM SCORE IS {np.mean(lgb_trainer.validation_score):.4f}")
-    first_models["lgb"] = lgb_trainer
-
-    tprint("TRAIN LightGBM xent")
-    params = {
-        "objective": "xentropy",
-        "boosting_type": "gbdt",
-        "metric": "mae",
-        "subsample": 0.9,
-        "colsample_bytree": 0.8,
-        "device": "cpu",
-        "learning_rate": 0.01,
-        "verbosity": -1,
-    }
-    xent_trainer = LGBTrainer(
-        state_path="./models",
-        predictors=predictors,
-        target_col="y",
-        X=train_df,
-        groups=train_df["base_year_half"],
-        test=test_df,
-        n_splits=n_splits,
-        n_rsb=n_rsb,
-        params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-    )
-    xent_trainer = fit_trainer(xent_trainer)
-    tprint(f"XENT SCORE IS {np.mean(xent_trainer.validation_score):.4f}")
-    first_models["xent"] = xent_trainer
 
     if on_colab:
         tprint("TRAIN XGBoost")
@@ -1006,7 +968,7 @@ if __name__ == "__main__":
             predictors=predictors,
             target_col="y",
             X=train_df,
-            groups=train_df["base_year_half"],
+            groups=train_df["base_year"],
             test=test_df,
             n_splits=n_splits,
             n_rsb=1,
@@ -1014,7 +976,6 @@ if __name__ == "__main__":
             categorical_cols=[],
         )
         xgb_trainer = fit_trainer(xgb_trainer)
-        first_models["xgb"] = xgb_trainer
 
         # ここからNN
         with open("./data/processed/train_df_nn.pickle", "rb") as f:
@@ -1022,14 +983,14 @@ if __name__ == "__main__":
         with open("./data/processed/test_df_nn.pickle", "rb") as f:
             test_df = pickle.load(f)
         tprint("TRAIN TabNet")
-        predictors = [x for x in train_df.columns if x not in ["y", "base_year_half"]]
+        predictors = [x for x in train_df.columns if x not in ["y"]]
 
         tab_trainer = TabNetTrainer(
             state_path="./models",
             predictors=predictors,
             target_col="y",
             X=train_df,
-            groups=train_df["base_year_half"],
+            groups=train_df["base_year"],
             test=test_df,
             n_splits=n_splits,
             n_rsb=1,
@@ -1037,7 +998,6 @@ if __name__ == "__main__":
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
         )
         tab_trainer = fit_trainer(tab_trainer)
-        first_models["tab"] = tab_trainer
 
         tprint("TRAIN NN")
         mlp_trainer = MLPTrainer(
@@ -1045,7 +1005,7 @@ if __name__ == "__main__":
             predictors=predictors,
             target_col="y",
             X=train_df,
-            groups=train_df["base_year_half"],
+            groups=train_df["base_year"],
             test=test_df,
             n_splits=n_splits,
             n_rsb=1,
@@ -1060,7 +1020,6 @@ if __name__ == "__main__":
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
         )
         mlp_trainer = fit_trainer(mlp_trainer)
-        first_models["mlp"] = mlp_trainer
 
         # blending
         if not debug:
