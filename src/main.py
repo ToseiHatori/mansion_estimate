@@ -270,31 +270,6 @@ def preprocess(train_df, test_df):
     # ここからGBDT系専用の処理
     # NN系の処理をすることを見越してcopyしておく
     df_nn = df.copy()
-    # 掛け算変数作成
-    numeric_cols_times = [
-        "area",
-        "year_of_construction",
-        "passed_year",
-        "time_to_station",
-        "floor_area_ratio",
-        "base_year",
-        "ID",
-    ]
-    encoder = Pipeline(
-        [
-            SelectNumerical(),
-            ArithmeticCombinations(
-                input_cols=numeric_cols_times,
-                drop_origin=True,
-                output_suffix="_times",
-                operator="*",
-                r=2,
-            ),
-        ]
-    )
-    encoded_df_times = encoder.fit_transform(df[numeric_cols])
-    df = pd.concat([df, encoded_df_times], axis=1)
-
     # label encoding
     category_columns = [
         "pref",
