@@ -972,6 +972,7 @@ if __name__ == "__main__":
     tprint("TRAIN LightGBM")
     params = {
         "objective": "mae",
+        "metric": "mae",
         "boosting_type": "gbdt",
         "device": "cpu",
         "learning_rate": 0.1,
