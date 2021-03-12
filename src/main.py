@@ -807,10 +807,10 @@ class TabNetTrainer(GroupKfoldTrainer):
         return dict(
             loss_fn="mae",
             max_epoch=300,
-            batch_size=1024,
+            batch_size=512,
             initialize_params=dict(
-                n_d=16,
-                n_a=16,
+                n_d=32,
+                n_a=32,
                 n_steps=3,
                 gamma=1.3,
                 cat_idxs=self.categorical_idx,
