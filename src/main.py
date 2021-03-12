@@ -927,6 +927,8 @@ if __name__ == "__main__":
     on_colab = "google.colab" in sys.modules
     predictors = [x for x in train_df.columns if x not in ["y"]]
     tprint(f"predictors length is {len(predictors)}")
+    stage2_oofs = []
+    stage2_preds = []
 
     tprint("TRAIN LightGBM")
     params = {
@@ -951,6 +953,8 @@ if __name__ == "__main__":
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
     lgb_trainer = fit_trainer(lgb_trainer)
+    stage2_oofs.append(lgb_trainer.oof)
+    stage2_preds.append(lgb_trainer.pred)
     tprint(f"LGBM SCORE IS {np.mean(lgb_trainer.validation_score):.4f}")
 
     if on_colab:
@@ -976,6 +980,8 @@ if __name__ == "__main__":
             categorical_cols=[],
         )
         xgb_trainer = fit_trainer(xgb_trainer)
+        stage2_oofs.append(xgb_trainer.oof)
+        stage2_preds.append(xgb_trainer.pred)
 
         # ここからNN
         with open("./data/processed/train_df_nn.pickle", "rb") as f:
@@ -998,6 +1004,8 @@ if __name__ == "__main__":
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
         )
         tab_trainer = fit_trainer(tab_trainer)
+        stage2_oofs.append(tab_trainer.oof)
+        stage2_preds.append(tab_trainer.pred)
 
         tprint("TRAIN NN")
         mlp_trainer = MLPTrainer(
@@ -1020,23 +1028,22 @@ if __name__ == "__main__":
             categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
         )
         mlp_trainer = fit_trainer(mlp_trainer)
+        stage2_oofs.append(mlp_trainer.oof)
+        stage2_preds.append(mlp_trainer.pred)
 
-        # blending
-        if not debug:
-            stage2_oofs = [lgb_trainer.oof, xgb_trainer.oof, tab_trainer.oof, mlp_trainer.oof]
-            stage2_preds = [lgb_trainer.pred, xgb_trainer.pred, tab_trainer.pred, mlp_trainer.pred]
-        best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
-        best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
-        tprint("post processed optimized weight", best_weights)
-        oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
-        blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
-        tprint("final oof score", mean_absolute_error(train_df.loc[lgb_trainer.valid_idx, "y"].values, oof_preds))
-        tprint("writing result...")
+    # blending
+    best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
+    best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
+    tprint("post processed optimized weight", best_weights)
+    oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
+    blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
+    tprint("final oof score", mean_absolute_error(train_df.loc[lgb_trainer.valid_idx, "y"].values, oof_preds))
+    tprint("writing result...")
 
-        if not debug:
-            with open("./models/final_oof_and_pred.pickle", "wb") as f:
-                pickle.dump([oof_preds, blend_preds], f)
-            # submit
-            sample_submission["取引価格（総額）_log"] = blend_preds
-            sample_submission.to_csv("./submit.csv", index=False)
-        tprint("---おわり---")
+    if not debug:
+        with open("./models/final_oof_and_pred.pickle", "wb") as f:
+            pickle.dump([oof_preds, blend_preds], f)
+        # submit
+        sample_submission["取引価格（総額）_log"] = blend_preds
+        sample_submission.to_csv("./submit.csv", index=False)
+    tprint("---おわり---")
