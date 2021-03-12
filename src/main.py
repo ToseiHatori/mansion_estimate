@@ -1023,11 +1023,8 @@ if __name__ == "__main__":
 
         # blending
         if not debug:
-            stage2_oofs = [lgb_trainer.oof, xent_trainer.oof, xgb_trainer.oof, tab_trainer.oof, mlp_trainer.oof]
-            stage2_preds = [lgb_trainer.pred, xent_trainer.pred, xgb_trainer.pred, tab_trainer.pred, mlp_trainer.pred]
-        else:
-            stage2_oofs = [lgb_trainer.oof, xent_trainer.oof]
-            stage2_preds = [lgb_trainer.pred, xent_trainer.pred]
+            stage2_oofs = [lgb_trainer.oof, xgb_trainer.oof, tab_trainer.oof, mlp_trainer.oof]
+            stage2_preds = [lgb_trainer.pred, xgb_trainer.pred, tab_trainer.pred, mlp_trainer.pred]
         best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
         best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
         tprint("post processed optimized weight", best_weights)
