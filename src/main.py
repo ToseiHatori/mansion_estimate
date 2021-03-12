@@ -933,7 +933,7 @@ def fit_trainer(trainer_instance):
 
 
 if __name__ == "__main__":
-    debug = True
+    debug = False
     tprint(f"debug mode {debug}")
     tprint("loading data")
     (train_df, test_df, sample_submission) = get_data()
@@ -961,7 +961,7 @@ if __name__ == "__main__":
     if debug:
         n_rsb = 1
     else:
-        n_rsb = 5
+        n_rsb = 3
     on_colab = "google.colab" in sys.modules
     predictors = [x for x in train_df.columns if x not in ["y"]]
     tprint(f"predictors length is {len(predictors)}")
