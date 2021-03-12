@@ -18,10 +18,11 @@ from typing import Any, ByteString, Callable, Dict, List, Optional, Tuple, Union
 
 import category_encoders as ce
 import feather
-import lightgbm as lgb
+
+# import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
-import optuna
+import optuna.integration.lightgbm as lgb
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -201,12 +202,17 @@ def preprocess(train_df, test_df):
 
     # 駅関係を取得
     df["station"] = df["最寄駅：名称"]
-    df["最寄駅：距離（分）"] = [x if x != "1H30?2H" else "105" for x in df["最寄駅：距離（分）"]]
+    df["最寄駅：距離（分）"] = [x if x != "1H30?2H" else "05" for x in df["最寄駅：距離（分）"]]
     df["最寄駅：距離（分）"] = [x if x != "1H?1H30" else "75" for x in df["最寄駅：距離（分）"]]
     df["最寄駅：距離（分）"] = [x if x != "2H?" else "120" for x in df["最寄駅：距離（分）"]]
     df["最寄駅：距離（分）"] = [x if x != "30分?60分" else "45" for x in df["最寄駅：距離（分）"]]
     df["time_to_station"] = df["最寄駅：距離（分）"].astype(float)
     del df["最寄駅：距離（分）"], df["最寄駅：名称"]
+    station = pd.read_csv("./data/external/station20151215free.txt", sep="\t", usecols=["station_name", "lon", "lat"])
+    station.columns = ["station", "station_lon", "station_lat"]
+    df = df.merge(station, on="station", how="left")
+    df["diff_lon"] = df["lon"] - df["station_lon"]
+    df["diff_lat"] = df["lat"] - df["station_lat"]
 
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
@@ -516,6 +522,7 @@ class LGBTrainer(GroupKfoldTrainer):
             early_stopping_rounds=100,
             verbose_eval=1000,
         )
+        tprint(f"best params {model.params}")
         ret = {}
         ret["model"] = model
         ret["importance"] = self._get_importance(model, importance_type="gain")
@@ -955,7 +962,7 @@ if __name__ == "__main__":
     if debug:
         n_rsb = 1
     else:
-        n_rsb = 3
+        n_rsb = 1
     on_colab = "google.colab" in sys.modules
     predictors = [x for x in train_df.columns if x not in ["y"]]
     tprint(f"predictors length is {len(predictors)}")
@@ -966,8 +973,6 @@ if __name__ == "__main__":
     params = {
         "objective": "mae",
         "boosting_type": "gbdt",
-        "subsample": 0.9,
-        "colsample_bytree": 0.8,
         "device": "cpu",
         "learning_rate": 0.1,
         "verbosity": -1,
