@@ -470,7 +470,6 @@ class GroupKfoldTrainer(object):
             _validation_score = self.loss_(self.oof[valid_idx], Y_valid.values)
             self.validation_score.append(_validation_score)
             tprint(f"     END FOLD {fold_cnt} WITH {_validation_score:.6f}")
-            self.pred = np.mean(self.pred, axis=0)
             tprint("----切り取り----\n")
 
         # validation score of fold mean
@@ -480,6 +479,7 @@ class GroupKfoldTrainer(object):
         self.oof = self.oof[self.valid_idx]
         oof_score = self.loss_(self.oof, self.X.loc[self.valid_idx, self.target_col])
         tprint(f"TOTAL OOF SCORE is : {oof_score:.6f}")
+        self.pred = np.mean(self.pred, axis=0)
         tprint("----終わり----\n")
 
 
