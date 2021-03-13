@@ -8,6 +8,7 @@ import inspect
 import logging
 import os
 import pickle
+import math
 import random
 import re
 import subprocess
@@ -193,24 +194,112 @@ def preprocess(train_df, test_df):
     # 緯度経度
     lat_lon = pd.read_csv("./data/external/lat_lon.csv")
     lat_lon.columns = ["pref_city_district", "lon", "lat"]
+    df_len = len(df.copy())
     df = df.merge(lat_lon, on="pref_city_district", how="left")
+    assert len(df) == df_len, f"{len(df)}, {df_len}"
     df["lat_x_lon"] = df["lat"] * df["lon"]
     df["lat_to_lon"] = (df["lat"] ** 2) + (df["lon"] ** 2)
     df["lat_to_lon"] = [x ** 0.5 for x in df["lat_to_lon"]]
 
     # 駅関係を取得
-    df["station"] = df["最寄駅：名称"]
+    df["station"] = df["最寄駅：名称"].replace(r"\(.+\)", "", regex=True)
+    df["station"] = df["station"].replace(r"\（.+\）", "", regex=True)
     df["最寄駅：距離（分）"] = [x if x != "1H30?2H" else "05" for x in df["最寄駅：距離（分）"]]
     df["最寄駅：距離（分）"] = [x if x != "1H?1H30" else "75" for x in df["最寄駅：距離（分）"]]
     df["最寄駅：距離（分）"] = [x if x != "2H?" else "120" for x in df["最寄駅：距離（分）"]]
     df["最寄駅：距離（分）"] = [x if x != "30分?60分" else "45" for x in df["最寄駅：距離（分）"]]
     df["time_to_station"] = df["最寄駅：距離（分）"].astype(float)
     del df["最寄駅：距離（分）"], df["最寄駅：名称"]
-    station = pd.read_csv("./data/external/station20151215free.txt", sep="\t", usecols=["station_name", "lon", "lat"])
-    station.columns = ["station", "station_lon", "station_lat"]
-    df = df.merge(station, on="station", how="left")
+    station = pd.read_csv("./data/external/station20151215free.txt", sep="\t").rename(
+        columns={"station_name": "station", "lon": "station_lon", "lat": "station_lat"}
+    )
+    station = station[~station[["station", "pref_cd"]].duplicated()]
+    station = station[~station[["station", "post"]].duplicated()]
+    pref_code = {
+        1: "北海道",
+        2: "青森県",
+        3: "岩手県",
+        4: "宮城県",
+        5: "秋田県",
+        6: "山形県",
+        7: "福島県",
+        8: "茨城県",
+        9: "栃木県",
+        10: "群馬県",
+        11: "埼玉県",
+        12: "千葉県",
+        13: "東京都",
+        14: "神奈川県",
+        15: "新潟県",
+        16: "富山県",
+        17: "石川県",
+        18: "福井県",
+        19: "山梨県",
+        20: "長野県",
+        21: "岐阜県",
+        22: "静岡県",
+        23: "愛知県",
+        24: "三重県",
+        25: "滋賀県",
+        26: "京都府",
+        27: "大阪府",
+        28: "兵庫県",
+        29: "奈良県",
+        30: "和歌山県",
+        31: "鳥取県",
+        32: "島根県",
+        33: "岡山県",
+        34: "広島県",
+        35: "山口県",
+        36: "徳島県",
+        37: "香川県",
+        38: "愛媛県",
+        39: "高知県",
+        40: "福岡県",
+        41: "佐賀県",
+        42: "長崎県",
+        43: "熊本県",
+        44: "大分県",
+        45: "宮崎県",
+        46: "鹿児島県",
+        47: "沖縄県",
+    }
+    station["pref"] = station["pref_cd"].map(pref_code)
+    station = station[["pref", "station", "station_lat", "station_lon", "line_cd"]]
+    station_extra_df = pd.read_csv("./data/external/station_extra.csv")
+    station = pd.concat([station, station_extra_df]).reset_index(drop=True)
+    station = station[~station[["station", "pref"]].duplicated()]
+    df = df.merge(station, on=["pref", "station"], how="left")
+    assert len(df) == df_len, f"{len(df)}, {df_len}"
+
+    df["station_lat_x_lon"] = df["station_lat"] * df["station_lon"]
+    df["station_lat_to_lon"] = (df["station_lat"] ** 2) + (df["station_lon"] ** 2)
+    df["station_lat_to_lon"] = [x ** 0.5 for x in df["station_lat_to_lon"]]
     df["diff_lon"] = df["lon"] - df["station_lon"]
     df["diff_lat"] = df["lat"] - df["station_lat"]
+    df["diff_station"] = df["station_lat_to_lon"] - df["lat_to_lon"]
+
+    def get_distance_m(lat1, lon1, lat2, lon2):
+        """
+        https://qiita.com/fetaro/items/b7c5abee42db54c0f26a
+        ２点間の距離(m)
+        球面三角法を利用した簡易的な距離計算
+        GoogleMapAPIのgeometory.computeDistanceBetweenのロジック
+        https://www.suzu6.net/posts/167-php-spherical-trigonometry/
+        """
+        R = 6378137.0  # 赤道半径
+        lat1 = math.radians(lat1)
+        lon1 = math.radians(lon1)
+        lat2 = math.radians(lat2)
+        lon2 = math.radians(lon2)
+        diff_lon = lon1 - lon2
+        dist = math.sin(lat1) * math.sin(lat2) + math.cos(lat1) * math.cos(lat2) * math.cos(diff_lon)
+        return R * math.acos(min(max(dist, -1.0), 1.0))
+
+    df["distance_to_station"] = [
+        get_distance_m(lat1, lon1, lat2, lon2)
+        for lat1, lon1, lat2, lon2 in zip(df["lat"], df["lon"], df["station_lat"], df["station_lon"])
+    ]
 
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
@@ -973,7 +1062,8 @@ if __name__ == "__main__":
         "metric": "mae",
         "boosting_type": "gbdt",
         "device": "cpu",
-        "learning_rate": 0.3,
+        "feature_fraction": 0.8,
+        "learning_rate": 0.1,
         "verbosity": -1,
     }
     lgb_trainer = LGBTrainer(
@@ -986,7 +1076,7 @@ if __name__ == "__main__":
         n_splits=n_splits,
         n_rsb=n_rsb,
         params=params,
-        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+        categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
     lgb_trainer = fit_trainer(lgb_trainer)
     stage2_oofs.append(lgb_trainer.oof)
