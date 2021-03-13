@@ -19,17 +19,15 @@ from typing import Any, ByteString, Callable, Dict, List, Optional, Tuple, Union
 import category_encoders as ce
 import feather
 
-# import lightgbm as lgb
+import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
-import optuna.integration.lightgbm as lgb
 import pandas as pd
 import torch
 import torch.nn as nn
 import xgboost as xgb
 from pytorch_tabnet.tab_model import TabNetRegressor
 from scipy.optimize import minimize
-from sklearn.linear_model import BayesianRidge, Ridge
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold, KFold
 from sklearn.preprocessing import MinMaxScaler
@@ -975,7 +973,7 @@ if __name__ == "__main__":
         "metric": "mae",
         "boosting_type": "gbdt",
         "device": "cpu",
-        "learning_rate": 0.1,
+        "learning_rate": 0.3,
         "verbosity": -1,
     }
     lgb_trainer = LGBTrainer(
