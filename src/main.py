@@ -157,7 +157,7 @@ def reduce_mem_usage(df, logger=None, level=logging.DEBUG):
 
 @Cache("./cache")
 def get_data():
-    unuse_columns = ["種類", "地域", "市区町村コード", "土地の形状", "間口", "延床面積（㎡）", "前面道路：方位", "前面道路：種類", "前面道路：幅員（ｍ）"]
+    unuse_columns = ["種類", "地域", "土地の形状", "間口", "延床面積（㎡）", "前面道路：方位", "前面道路：種類", "前面道路：幅員（ｍ）"]
     train_files = sorted(glob.glob("./data/raw/train/*"))
     train_df = []
     for file in train_files:
@@ -300,6 +300,12 @@ def preprocess(train_df, test_df):
         get_distance_m(lat1, lon1, lat2, lon2)
         for lat1, lon1, lat2, lon2 in zip(df["lat"], df["lon"], df["station_lat"], df["station_lon"])
     ]
+
+    # 国勢調査
+    unuse = ["census_都道府県名", "census_都道府県市区町村名"]
+    census = pd.read_csv("./data/external/census.csv").drop(unuse, axis=1).reset_index(drop=True)
+    df = df.merge(census, on="市区町村コード", how="left")
+    assert len(df) == df_len, f"{len(df)}, {df_len}"
 
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
