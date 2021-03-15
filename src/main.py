@@ -906,7 +906,7 @@ class XGBTrainer(GroupKfoldTrainer):
         ret = {}
         ret["model"] = model
         ret["importance"] = self._get_importance(model)
-        if (self.params["random_seed"] == 0) and (self.fold_cnt == 1):
+        if (self.params["seed"] == 0) and (self.fold_cnt == 1):
             tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
             tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
         return ret
