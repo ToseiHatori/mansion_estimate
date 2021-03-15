@@ -1120,6 +1120,7 @@ if __name__ == "__main__":
             train_df = pickle.load(f)
         with open("./data/processed/test_df_nn.pickle", "rb") as f:
             test_df = pickle.load(f)
+        """
         tprint("TRAIN TabNet")
         predictors = [x for x in train_df.columns if x not in ["y"]]
 
@@ -1162,6 +1163,7 @@ if __name__ == "__main__":
         mlp_trainer = fit_trainer(mlp_trainer)
         stage2_oofs.append(mlp_trainer.oof)
         stage2_preds.append(mlp_trainer.pred)
+        """
 
     # blending
     best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
