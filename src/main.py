@@ -906,8 +906,9 @@ class XGBTrainer(GroupKfoldTrainer):
         ret = {}
         ret["model"] = model
         ret["importance"] = self._get_importance(model)
-        tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
-        tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
+        if (self.params["random_seed"] == 0) and (self.fold_cnt == 1):
+            tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
+            tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
         return ret
 
     def _predict(self, model, X):
@@ -1107,7 +1108,7 @@ if __name__ == "__main__":
             groups=train_df["base_year"],
             test=test_df,
             n_splits=n_splits,
-            n_rsb=1,
+            n_rsb=n_rsb,
             params=params,
             categorical_cols=[],
         )
