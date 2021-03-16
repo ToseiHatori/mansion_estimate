@@ -27,7 +27,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import xgboost as xgb
-from pytorch_tabnet.tab_model import TabNetRegressor
 from scipy.optimize import minimize
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold, KFold
