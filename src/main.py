@@ -658,13 +658,12 @@ class MEDataset(Dataset):
 
 
 class MLPModel(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self, input_dim, dropout_rate=0.5):
         super(MLPModel, self).__init__()
         pref_dim = 10
         city_dim = 100
         district_dim = 1000
         station_dim = 100
-        dropout_rate = 0.25
         self.emb_pref = nn.Sequential(
             nn.Embedding(num_embeddings=48, embedding_dim=pref_dim),
             # nn.Linear(pref_dim, pref_dim),
@@ -782,7 +781,7 @@ class MLPTrainer(GroupKfoldTrainer):
         val_loader = DataLoader(val_set, batch_size=10240, num_workers=0)
 
         # create network, optimizer, scheduler
-        network = MLPModel(_X_train.shape[1])
+        network = MLPModel(_X_train.shape[1], dropout_rate=0.25)
         optimizer = Adam(network.parameters(), lr=self.params["lr"])
         scheduler = ReduceLROnPlateau(
             optimizer, mode="min", factor=self.params["factor"], patience=self.params["patience"], verbose=True
@@ -1045,7 +1044,6 @@ if __name__ == "__main__":
             train_df = pickle.load(f)
         with open("./data/processed/test_df_nn.pickle", "rb") as f:
             test_df = pickle.load(f)
-        tprint("TRAIN TabNet")
         predictors = [x for x in train_df.columns if x not in ["y"]]
 
         tprint("TRAIN NN")
