@@ -27,7 +27,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import xgboost as xgb
-from pytorch_tabnet.tab_model import TabNetRegressor
 from scipy.optimize import minimize
 from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GroupKFold, KFold
@@ -906,88 +905,14 @@ class XGBTrainer(GroupKfoldTrainer):
         ret = {}
         ret["model"] = model
         ret["importance"] = self._get_importance(model)
-        tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
-        tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
+        if (self.params["seed"] == 0) and (self.fold_cnt == 1):
+            tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
+            tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
         return ret
 
     def _predict(self, model, X):
         dtest = xgb.DMatrix(X[self.predictors], feature_names=self.predictors)
         return model.predict(dtest, ntree_limit=model.best_ntree_limit)
-
-
-class TabNetTrainer(GroupKfoldTrainer):
-    def __init__(self, state_path, predictors, target_col, X, groups, test, n_splits, n_rsb, params, categorical_cols):
-        super().__init__(state_path, predictors, target_col, X, groups, test, n_splits, n_rsb)
-        self.categorical_cols = categorical_cols
-        self.categorical_idx = [i for i, x in enumerate(predictors) if x in self.categorical_cols]
-        self.numeric_cols = [x for x in predictors if x not in categorical_cols]
-        if params is None:
-            self.params = {}
-        else:
-            self.params = params
-
-    def _get_default_params(self):
-        return dict(
-            loss_fn="mae",
-            max_epoch=300,
-            batch_size=512,
-            initialize_params=dict(
-                n_d=32,
-                n_a=32,
-                n_steps=3,
-                gamma=1.3,
-                cat_idxs=self.categorical_idx,
-                cat_dims=[48, 619, 15457, 3844],
-                cat_emb_dim=[10, 100, 1000, 100],
-                optimizer_fn=torch.optim.Adam,
-                optimizer_params=dict(lr=1e-3),
-                mask_type="entmax",
-                scheduler_params=dict(mode="min", patience=10, min_lr=1e-6, factor=0.1),
-                scheduler_fn=ReduceLROnPlateau,
-                seed=42,
-                verbose=10,
-            ),
-        )
-
-    def _get_importance(self, model, importance_type="gain"):
-        return
-
-    def _fit(self, X_train, Y_train, X_valid, Y_valid, loop_seed):
-        set_seed(loop_seed)
-        _params = self._get_default_params()
-        _params.update(self.params)
-        _params["initialize_params"]["seed"] = loop_seed
-        tprint(f"TabNet params: {_params}")
-        # pd -> array
-        X_train = X_train.values
-        X_valid = X_valid.values
-        Y_train = Y_train.values.reshape(-1, 1)
-        Y_valid = Y_valid.values.reshape(-1, 1)
-
-        model = TabNetRegressor(**_params["initialize_params"])
-        ret = {}
-        model.fit(
-            X_train=X_train,
-            y_train=Y_train,
-            eval_set=[(X_valid, Y_valid)],
-            eval_name=["val"],
-            eval_metric=["mae"],
-            max_epochs=_params["max_epoch"],
-            patience=20,
-            batch_size=_params["batch_size"],
-            virtual_batch_size=32,
-            num_workers=0,
-            drop_last=False,
-        )
-        ret["model"] = model
-        # ret["importance"] = self._get_importance(model, importance_type="gain")
-        # tprint(f'importance(TOP20): {ret["importance"].sort_values(by="importance", ascending=False).head(20)}')
-        # tprint(f'importance(UND20): {ret["importance"].sort_values(by="importance", ascending=False).tail(20)}')
-        return ret
-
-    def _predict(self, model, X):
-        pred = model.predict(X[self.predictors].values).reshape(-1)
-        return pred
 
 
 def get_score(weights, train_idx, oofs, labels):
@@ -1107,7 +1032,7 @@ if __name__ == "__main__":
             groups=train_df["base_year"],
             test=test_df,
             n_splits=n_splits,
-            n_rsb=1,
+            n_rsb=n_rsb,
             params=params,
             categorical_cols=[],
         )
@@ -1120,25 +1045,8 @@ if __name__ == "__main__":
             train_df = pickle.load(f)
         with open("./data/processed/test_df_nn.pickle", "rb") as f:
             test_df = pickle.load(f)
-        """
         tprint("TRAIN TabNet")
         predictors = [x for x in train_df.columns if x not in ["y"]]
-
-        tab_trainer = TabNetTrainer(
-            state_path="./models",
-            predictors=predictors,
-            target_col="y",
-            X=train_df,
-            groups=train_df["base_year"],
-            test=test_df,
-            n_splits=n_splits,
-            n_rsb=1,
-            params={},
-            categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-        )
-        tab_trainer = fit_trainer(tab_trainer)
-        stage2_oofs.append(tab_trainer.oof)
-        stage2_preds.append(tab_trainer.pred)
 
         tprint("TRAIN NN")
         mlp_trainer = MLPTrainer(
@@ -1163,7 +1071,6 @@ if __name__ == "__main__":
         mlp_trainer = fit_trainer(mlp_trainer)
         stage2_oofs.append(mlp_trainer.oof)
         stage2_preds.append(mlp_trainer.pred)
-        """
 
     # blending
     best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
