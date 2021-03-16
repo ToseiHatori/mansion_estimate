@@ -1059,7 +1059,7 @@ if __name__ == "__main__":
             n_splits=n_splits,
             n_rsb=1,
             params={
-                "n_epoch": 10 if debug else 100,
+                "n_epoch": 10 if debug else 1000,
                 "lr": 1e-3,
                 "batch_size": 512,
                 "patience": 10,
