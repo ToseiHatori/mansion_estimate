@@ -664,7 +664,7 @@ class MLPModel(nn.Module):
         city_dim = 100
         district_dim = 1000
         station_dim = 100
-        dropout_rate = 0.5
+        dropout_rate = 0.25
         self.emb_pref = nn.Sequential(
             nn.Embedding(num_embeddings=48, embedding_dim=pref_dim),
             # nn.Linear(pref_dim, pref_dim),
