@@ -781,7 +781,7 @@ class MLPTrainer(GroupKfoldTrainer):
         val_loader = DataLoader(val_set, batch_size=10240, num_workers=0)
 
         # create network, optimizer, scheduler
-        network = MLPModel(_X_train.shape[1], dropout_rate=0.25)
+        network = MLPModel(_X_train.shape[1], dropout_rate=0.15)
         optimizer = Adam(network.parameters(), lr=self.params["lr"])
         scheduler = ReduceLROnPlateau(
             optimizer, mode="min", factor=self.params["factor"], patience=self.params["patience"], verbose=True
