@@ -666,31 +666,31 @@ class MLPModel(nn.Module):
         station_dim = 100
         self.emb_pref = nn.Sequential(
             nn.Embedding(num_embeddings=48, embedding_dim=pref_dim),
-            # nn.Linear(pref_dim, pref_dim),
-            # nn.PReLU(),
-            # nn.BatchNorm1d(pref_dim),
-            # nn.Dropout(dropout_rate),
+            nn.Linear(pref_dim, pref_dim),
+            nn.PReLU(),
+            nn.BatchNorm1d(pref_dim),
+            nn.Dropout(dropout_rate),
         )
         self.emb_city = nn.Sequential(
             nn.Embedding(num_embeddings=619, embedding_dim=city_dim),
-            # nn.Linear(city_dim, city_dim),
-            # nn.PReLU(),
-            # nn.BatchNorm1d(city_dim),
-            # nn.Dropout(dropout_rate),
+            nn.Linear(city_dim, city_dim),
+            nn.PReLU(),
+            nn.BatchNorm1d(city_dim),
+            nn.Dropout(dropout_rate),
         )
         self.emb_district = nn.Sequential(
             nn.Embedding(num_embeddings=15457, embedding_dim=district_dim),
-            # nn.Linear(district_dim, district_dim),
-            # nn.PReLU(),
-            # nn.BatchNorm1d(district_dim),
-            # nn.Dropout(dropout_rate),
+            nn.Linear(district_dim, district_dim),
+            nn.PReLU(),
+            nn.BatchNorm1d(district_dim),
+            nn.Dropout(dropout_rate),
         )
         self.emb_station = nn.Sequential(
             nn.Embedding(num_embeddings=3844, embedding_dim=station_dim),
-            # nn.Linear(station_dim, station_dim),
-            # nn.PReLU(),
-            # nn.BatchNorm1d(station_dim),
-            # nn.Dropout(dropout_rate),
+            nn.Linear(station_dim, station_dim),
+            nn.PReLU(),
+            nn.BatchNorm1d(station_dim),
+            nn.Dropout(dropout_rate),
         )
         self.sq1 = nn.Sequential(
             nn.Linear(pref_dim + city_dim + district_dim + station_dim, 1000),
