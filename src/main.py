@@ -1,4 +1,3 @@
-import argparse
 import copy
 import datetime
 import gc
@@ -6,12 +5,11 @@ import glob
 import hashlib
 import inspect
 import logging
+import math
 import os
 import pickle
-import math
 import random
 import re
-import subprocess
 import sys
 from inspect import signature
 from pathlib import Path
@@ -19,9 +17,7 @@ from typing import Any, ByteString, Callable, Dict, List, Optional, Tuple, Union
 
 import category_encoders as ce
 import feather
-
 import lightgbm as lgb
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -35,7 +31,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
-from xfeat import ArithmeticCombinations, Pipeline, SelectNumerical, aggregation
+from xfeat import Pipeline, SelectNumerical
 
 gc.enable()
 pd.options.display.max_columns = None
@@ -664,34 +660,10 @@ class MLPModel(nn.Module):
         city_dim = 100
         district_dim = 1000
         station_dim = 100
-        self.emb_pref = nn.Sequential(
-            nn.Embedding(num_embeddings=48, embedding_dim=pref_dim),
-            nn.Linear(pref_dim, pref_dim),
-            nn.PReLU(),
-            nn.BatchNorm1d(pref_dim),
-            nn.Dropout(dropout_rate),
-        )
-        self.emb_city = nn.Sequential(
-            nn.Embedding(num_embeddings=619, embedding_dim=city_dim),
-            nn.Linear(city_dim, city_dim),
-            nn.PReLU(),
-            nn.BatchNorm1d(city_dim),
-            nn.Dropout(dropout_rate),
-        )
-        self.emb_district = nn.Sequential(
-            nn.Embedding(num_embeddings=15457, embedding_dim=district_dim),
-            nn.Linear(district_dim, district_dim),
-            nn.PReLU(),
-            nn.BatchNorm1d(district_dim),
-            nn.Dropout(dropout_rate),
-        )
-        self.emb_station = nn.Sequential(
-            nn.Embedding(num_embeddings=3844, embedding_dim=station_dim),
-            nn.Linear(station_dim, station_dim),
-            nn.PReLU(),
-            nn.BatchNorm1d(station_dim),
-            nn.Dropout(dropout_rate),
-        )
+        self.emb_pref = nn.Sequential(nn.Embedding(num_embeddings=48, embedding_dim=pref_dim))
+        self.emb_city = nn.Sequential(nn.Embedding(num_embeddings=619, embedding_dim=city_dim))
+        self.emb_district = nn.Sequential(nn.Embedding(num_embeddings=15457, embedding_dim=district_dim))
+        self.emb_station = nn.Sequential(nn.Embedding(num_embeddings=3844, embedding_dim=station_dim))
         self.sq1 = nn.Sequential(
             nn.Linear(pref_dim + city_dim + district_dim + station_dim, 1000),
             nn.PReLU(),
@@ -781,7 +753,7 @@ class MLPTrainer(GroupKfoldTrainer):
         val_loader = DataLoader(val_set, batch_size=10240, num_workers=0)
 
         # create network, optimizer, scheduler
-        network = MLPModel(_X_train.shape[1], dropout_rate=0.250)
+        network = MLPModel(_X_train.shape[1], dropout_rate=0.150)
         optimizer = Adam(network.parameters(), lr=self.params["lr"])
         scheduler = ReduceLROnPlateau(
             optimizer, mode="min", factor=self.params["factor"], patience=self.params["patience"], verbose=True
@@ -1055,7 +1027,7 @@ if __name__ == "__main__":
             groups=train_df["base_year"],
             test=test_df,
             n_splits=n_splits,
-            n_rsb=1,
+            n_rsb=n_rsb,
             params={
                 "n_epoch": 10 if debug else 1000,
                 "lr": 1e-3,
