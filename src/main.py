@@ -302,6 +302,11 @@ def preprocess(train_df, test_df):
     df = df.merge(census, on="市区町村コード", how="left")
     assert len(df) == df_len, f"{len(df)}, {df_len}"
 
+    # 公示価格
+    price_df = pd.read_csv("./data/external/price.csv")
+    df = df.merge(price_df, on="市区町村コード", how="left")
+    assert len(df) == df_len, f"{len(df)}, {df_len}"
+
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
         if m is not None:
@@ -361,11 +366,6 @@ def preprocess(train_df, test_df):
     # ここからGBDT系専用の処理
     # NN系の処理をすることを見越してcopyしておく
     df_nn = df.copy()
-    # 掛け算変数
-    # df["areayear_of_construction_times"] = df["area"] * df["year_of_construction"]
-    # df["areafloor_area_ratio_times"] = df["area"] * df["floor_area_ratio"]
-    # df["passed_yeartime_to_station_times"] = df["passed_year"] * df["time_to_station"]
-    # df["areabase_year_times"] = df["area"] * df["base_year"]
 
     # label encoding
     category_columns = [
@@ -1017,6 +1017,7 @@ if __name__ == "__main__":
         with open("./data/processed/test_df_nn.pickle", "rb") as f:
             test_df = pickle.load(f)
         predictors = [x for x in train_df.columns if x not in ["y"]]
+        tprint(f"predictors length is {len(predictors)}")
 
         tprint("TRAIN NN")
         mlp_trainer = MLPTrainer(
