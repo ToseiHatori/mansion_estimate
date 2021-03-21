@@ -1,4 +1,3 @@
-import argparse
 import copy
 import datetime
 import gc
@@ -6,12 +5,11 @@ import glob
 import hashlib
 import inspect
 import logging
+import math
 import os
 import pickle
-import math
 import random
 import re
-import subprocess
 import sys
 from inspect import signature
 from pathlib import Path
@@ -19,9 +17,7 @@ from typing import Any, ByteString, Callable, Dict, List, Optional, Tuple, Union
 
 import category_encoders as ce
 import feather
-
 import lightgbm as lgb
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
@@ -35,7 +31,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
-from xfeat import ArithmeticCombinations, Pipeline, SelectNumerical, aggregation
+from xfeat import Pipeline, SelectNumerical
 
 gc.enable()
 pd.options.display.max_columns = None
@@ -306,6 +302,11 @@ def preprocess(train_df, test_df):
     df = df.merge(census, on="市区町村コード", how="left")
     assert len(df) == df_len, f"{len(df)}, {df_len}"
 
+    # 公示価格
+    price_df = pd.read_csv("./data/external/price.csv")
+    df = df.merge(price_df, on="市区町村コード", how="left")
+    assert len(df) == df_len, f"{len(df)}, {df_len}"
+
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
         if m is not None:
@@ -365,11 +366,6 @@ def preprocess(train_df, test_df):
     # ここからGBDT系専用の処理
     # NN系の処理をすることを見越してcopyしておく
     df_nn = df.copy()
-    # 掛け算変数
-    # df["areayear_of_construction_times"] = df["area"] * df["year_of_construction"]
-    # df["areafloor_area_ratio_times"] = df["area"] * df["floor_area_ratio"]
-    # df["passed_yeartime_to_station_times"] = df["passed_year"] * df["time_to_station"]
-    # df["areabase_year_times"] = df["area"] * df["base_year"]
 
     # label encoding
     category_columns = [
@@ -658,41 +654,16 @@ class MEDataset(Dataset):
 
 
 class MLPModel(nn.Module):
-    def __init__(self, input_dim):
+    def __init__(self, input_dim, dropout_rate=0.5):
         super(MLPModel, self).__init__()
         pref_dim = 10
         city_dim = 100
         district_dim = 1000
         station_dim = 100
-        dropout_rate = 0.5
-        self.emb_pref = nn.Sequential(
-            nn.Embedding(num_embeddings=48, embedding_dim=pref_dim),
-            # nn.Linear(pref_dim, pref_dim),
-            # nn.PReLU(),
-            # nn.BatchNorm1d(pref_dim),
-            # nn.Dropout(dropout_rate),
-        )
-        self.emb_city = nn.Sequential(
-            nn.Embedding(num_embeddings=619, embedding_dim=city_dim),
-            # nn.Linear(city_dim, city_dim),
-            # nn.PReLU(),
-            # nn.BatchNorm1d(city_dim),
-            # nn.Dropout(dropout_rate),
-        )
-        self.emb_district = nn.Sequential(
-            nn.Embedding(num_embeddings=15457, embedding_dim=district_dim),
-            # nn.Linear(district_dim, district_dim),
-            # nn.PReLU(),
-            # nn.BatchNorm1d(district_dim),
-            # nn.Dropout(dropout_rate),
-        )
-        self.emb_station = nn.Sequential(
-            nn.Embedding(num_embeddings=3844, embedding_dim=station_dim),
-            # nn.Linear(station_dim, station_dim),
-            # nn.PReLU(),
-            # nn.BatchNorm1d(station_dim),
-            # nn.Dropout(dropout_rate),
-        )
+        self.emb_pref = nn.Sequential(nn.Embedding(num_embeddings=48, embedding_dim=pref_dim))
+        self.emb_city = nn.Sequential(nn.Embedding(num_embeddings=619, embedding_dim=city_dim))
+        self.emb_district = nn.Sequential(nn.Embedding(num_embeddings=15457, embedding_dim=district_dim))
+        self.emb_station = nn.Sequential(nn.Embedding(num_embeddings=3844, embedding_dim=station_dim))
         self.sq1 = nn.Sequential(
             nn.Linear(pref_dim + city_dim + district_dim + station_dim, 1000),
             nn.PReLU(),
@@ -782,7 +753,7 @@ class MLPTrainer(GroupKfoldTrainer):
         val_loader = DataLoader(val_set, batch_size=10240, num_workers=0)
 
         # create network, optimizer, scheduler
-        network = MLPModel(_X_train.shape[1])
+        network = MLPModel(_X_train.shape[1], dropout_rate=0.150)
         optimizer = Adam(network.parameters(), lr=self.params["lr"])
         scheduler = ReduceLROnPlateau(
             optimizer, mode="min", factor=self.params["factor"], patience=self.params["patience"], verbose=True
@@ -981,7 +952,6 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_rsb = 3
-    on_colab = "google.colab" in sys.modules
     predictors = [x for x in train_df.columns if x not in ["y"]]
     tprint(f"predictors length is {len(predictors)}")
     stage2_oofs = []
@@ -1014,63 +984,62 @@ if __name__ == "__main__":
     stage2_preds.append(lgb_trainer.pred)
     tprint(f"LGBM SCORE IS {np.mean(lgb_trainer.validation_score):.4f}")
 
-    if on_colab:
-        tprint("TRAIN XGBoost")
-        params = {
-            "objective": "reg:squarederror",
-            "eval_metric": "mae",
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "eta": 0.01,
-            "tree_method": "hist" if debug else "gpu_hist",
-        }
-        xgb_trainer = XGBTrainer(
-            state_path="./models",
-            predictors=predictors,
-            target_col="y",
-            X=train_df,
-            groups=train_df["base_year"],
-            test=test_df,
-            n_splits=n_splits,
-            n_rsb=n_rsb,
-            params=params,
-            categorical_cols=[],
-        )
-        xgb_trainer = fit_trainer(xgb_trainer)
-        stage2_oofs.append(xgb_trainer.oof)
-        stage2_preds.append(xgb_trainer.pred)
+    tprint("TRAIN XGBoost")
+    params = {
+        "objective": "reg:squarederror",
+        "eval_metric": "mae",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "eta": 0.01,
+        "tree_method": "hist" if debug else "gpu_hist",
+    }
+    xgb_trainer = XGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params=params,
+        categorical_cols=[],
+    )
+    xgb_trainer = fit_trainer(xgb_trainer)
+    stage2_oofs.append(xgb_trainer.oof)
+    stage2_preds.append(xgb_trainer.pred)
 
-        # ここからNN
-        with open("./data/processed/train_df_nn.pickle", "rb") as f:
-            train_df = pickle.load(f)
-        with open("./data/processed/test_df_nn.pickle", "rb") as f:
-            test_df = pickle.load(f)
-        tprint("TRAIN TabNet")
-        predictors = [x for x in train_df.columns if x not in ["y"]]
+    # ここからNN
+    with open("./data/processed/train_df_nn.pickle", "rb") as f:
+        train_df = pickle.load(f)
+    with open("./data/processed/test_df_nn.pickle", "rb") as f:
+        test_df = pickle.load(f)
+    predictors = [x for x in train_df.columns if x not in ["y"]]
+    tprint(f"predictors length is {len(predictors)}")
 
-        tprint("TRAIN NN")
-        mlp_trainer = MLPTrainer(
-            state_path="./models",
-            predictors=predictors,
-            target_col="y",
-            X=train_df,
-            groups=train_df["base_year"],
-            test=test_df,
-            n_splits=n_splits,
-            n_rsb=1,
-            params={
-                "n_epoch": 10 if debug else 1000,
-                "lr": 1e-3,
-                "batch_size": 512,
-                "patience": 10,
-                "factor": 0.1,
-                "early_stopping_rounds": 20,
-            },
-            categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-        )
-        mlp_trainer = fit_trainer(mlp_trainer)
-        stage2_oofs.append(mlp_trainer.oof)
-        stage2_preds.append(mlp_trainer.pred)
+    tprint("TRAIN NN")
+    mlp_trainer = MLPTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=1,
+        params={
+            "n_epoch": 10 if debug else 1000,
+            "lr": 1e-3,
+            "batch_size": 512,
+            "patience": 10,
+            "factor": 0.1,
+            "early_stopping_rounds": 20,
+        },
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+    )
+    mlp_trainer = fit_trainer(mlp_trainer)
+    stage2_oofs.append(mlp_trainer.oof)
+    stage2_preds.append(mlp_trainer.pred)
 
     # blending
     best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
