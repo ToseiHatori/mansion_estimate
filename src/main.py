@@ -1030,7 +1030,7 @@ if __name__ == "__main__":
         params={
             "n_epoch": 10 if debug else 1000,
             "lr": 1e-3,
-            "batch_size": 512,
+            "batch_size": 1024,
             "patience": 10,
             "factor": 0.1,
             "early_stopping_rounds": 20,
