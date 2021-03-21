@@ -952,7 +952,6 @@ if __name__ == "__main__":
         n_rsb = 1
     else:
         n_rsb = 3
-    on_colab = "google.colab" in sys.modules
     predictors = [x for x in train_df.columns if x not in ["y"]]
     tprint(f"predictors length is {len(predictors)}")
     stage2_oofs = []
@@ -985,63 +984,62 @@ if __name__ == "__main__":
     stage2_preds.append(lgb_trainer.pred)
     tprint(f"LGBM SCORE IS {np.mean(lgb_trainer.validation_score):.4f}")
 
-    if on_colab:
-        tprint("TRAIN XGBoost")
-        params = {
-            "objective": "reg:squarederror",
-            "eval_metric": "mae",
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "eta": 0.01,
-            "tree_method": "hist" if debug else "gpu_hist",
-        }
-        xgb_trainer = XGBTrainer(
-            state_path="./models",
-            predictors=predictors,
-            target_col="y",
-            X=train_df,
-            groups=train_df["base_year"],
-            test=test_df,
-            n_splits=n_splits,
-            n_rsb=n_rsb,
-            params=params,
-            categorical_cols=[],
-        )
-        xgb_trainer = fit_trainer(xgb_trainer)
-        stage2_oofs.append(xgb_trainer.oof)
-        stage2_preds.append(xgb_trainer.pred)
+    tprint("TRAIN XGBoost")
+    params = {
+        "objective": "reg:squarederror",
+        "eval_metric": "mae",
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "eta": 0.01,
+        "tree_method": "hist" if debug else "gpu_hist",
+    }
+    xgb_trainer = XGBTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=n_rsb,
+        params=params,
+        categorical_cols=[],
+    )
+    xgb_trainer = fit_trainer(xgb_trainer)
+    stage2_oofs.append(xgb_trainer.oof)
+    stage2_preds.append(xgb_trainer.pred)
 
-        # ここからNN
-        with open("./data/processed/train_df_nn.pickle", "rb") as f:
-            train_df = pickle.load(f)
-        with open("./data/processed/test_df_nn.pickle", "rb") as f:
-            test_df = pickle.load(f)
-        predictors = [x for x in train_df.columns if x not in ["y"]]
-        tprint(f"predictors length is {len(predictors)}")
+    # ここからNN
+    with open("./data/processed/train_df_nn.pickle", "rb") as f:
+        train_df = pickle.load(f)
+    with open("./data/processed/test_df_nn.pickle", "rb") as f:
+        test_df = pickle.load(f)
+    predictors = [x for x in train_df.columns if x not in ["y"]]
+    tprint(f"predictors length is {len(predictors)}")
 
-        tprint("TRAIN NN")
-        mlp_trainer = MLPTrainer(
-            state_path="./models",
-            predictors=predictors,
-            target_col="y",
-            X=train_df,
-            groups=train_df["base_year"],
-            test=test_df,
-            n_splits=n_splits,
-            n_rsb=n_rsb,
-            params={
-                "n_epoch": 10 if debug else 1000,
-                "lr": 1e-3,
-                "batch_size": 512,
-                "patience": 10,
-                "factor": 0.1,
-                "early_stopping_rounds": 20,
-            },
-            categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
-        )
-        mlp_trainer = fit_trainer(mlp_trainer)
-        stage2_oofs.append(mlp_trainer.oof)
-        stage2_preds.append(mlp_trainer.pred)
+    tprint("TRAIN NN")
+    mlp_trainer = MLPTrainer(
+        state_path="./models",
+        predictors=predictors,
+        target_col="y",
+        X=train_df,
+        groups=train_df["base_year"],
+        test=test_df,
+        n_splits=n_splits,
+        n_rsb=1,
+        params={
+            "n_epoch": 10 if debug else 1000,
+            "lr": 1e-3,
+            "batch_size": 512,
+            "patience": 10,
+            "factor": 0.1,
+            "early_stopping_rounds": 20,
+        },
+        categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
+    )
+    mlp_trainer = fit_trainer(mlp_trainer)
+    stage2_oofs.append(mlp_trainer.oof)
+    stage2_preds.append(mlp_trainer.pred)
 
     # blending
     best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
