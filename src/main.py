@@ -991,6 +991,7 @@ if __name__ == "__main__":
         "eval_metric": "mae",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
+        "max_depth": 8,
         "eta": 0.01,
         "tree_method": "hist" if debug else "gpu_hist",
     }
