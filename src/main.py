@@ -658,18 +658,18 @@ class MLPModel(nn.Module):
         super(MLPModel, self).__init__()
         pref_dim = 10
         city_dim = 100
-        district_dim = 1000
+        district_dim = 100
         station_dim = 100
         self.emb_pref = nn.Sequential(nn.Embedding(num_embeddings=48, embedding_dim=pref_dim))
         self.emb_city = nn.Sequential(nn.Embedding(num_embeddings=619, embedding_dim=city_dim))
         self.emb_district = nn.Sequential(nn.Embedding(num_embeddings=15457, embedding_dim=district_dim))
         self.emb_station = nn.Sequential(nn.Embedding(num_embeddings=3844, embedding_dim=station_dim))
         self.sq1 = nn.Sequential(
-            nn.Linear(pref_dim + city_dim + district_dim + station_dim, 1000),
+            nn.Linear(pref_dim + city_dim + district_dim + station_dim, 100),
             nn.PReLU(),
-            nn.BatchNorm1d(1000),
+            nn.BatchNorm1d(100),
             nn.Dropout(dropout_rate),
-            nn.Linear(1000, 100),
+            nn.Linear(100, 100),
             nn.PReLU(),
             nn.BatchNorm1d(100),
             nn.Dropout(dropout_rate),
