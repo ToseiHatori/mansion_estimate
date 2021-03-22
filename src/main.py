@@ -964,6 +964,7 @@ if __name__ == "__main__":
         "boosting_type": "gbdt",
         "device": "cpu",
         "feature_fraction": 0.8,
+        "num_leaves": 1024,
         "learning_rate": 0.1,
         "verbosity": -1,
     }
@@ -990,6 +991,7 @@ if __name__ == "__main__":
         "eval_metric": "mae",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
+        "max_depth": 8,
         "eta": 0.01,
         "tree_method": "hist" if debug else "gpu_hist",
     }
@@ -1030,7 +1032,7 @@ if __name__ == "__main__":
         params={
             "n_epoch": 10 if debug else 1000,
             "lr": 1e-3,
-            "batch_size": 512,
+            "batch_size": 1024,
             "patience": 10,
             "factor": 0.1,
             "early_stopping_rounds": 20,
