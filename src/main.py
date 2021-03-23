@@ -756,7 +756,12 @@ class MLPTrainer(GroupKfoldTrainer):
         network = MLPModel(_X_train.shape[1], dropout_rate=0.150)
         optimizer = Adam(network.parameters(), lr=self.params["lr"])
         scheduler = ReduceLROnPlateau(
-            optimizer, mode="min", factor=self.params["factor"], patience=self.params["patience"], verbose=True
+            optimizer,
+            mode="min",
+            factor=self.params["factor"],
+            patience=self.params["patience"],
+            min_lr=self.params["min_lr"],
+            verbose=True,
         )
         val_loss_plot = []
         # begin training...
@@ -1035,7 +1040,8 @@ if __name__ == "__main__":
             "batch_size": 512,
             "patience": 20,
             "factor": 0.1,
-            "early_stopping_rounds": 20,
+            "early_stopping_rounds": 30,
+            "min_lr": 1e-5,
         },
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
     )
