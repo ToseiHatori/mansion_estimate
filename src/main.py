@@ -969,7 +969,7 @@ if __name__ == "__main__":
         "boosting_type": "gbdt",
         "device": "cpu",
         "feature_fraction": 0.8,
-        "num_leaves": 2048,
+        "num_leaves": 4096,
         "learning_rate": 0.1,
         "verbosity": -1,
     }
@@ -996,7 +996,7 @@ if __name__ == "__main__":
         "eval_metric": "mae",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "max_depth": 10,
+        "max_depth": 12,
         "eta": 0.01,
         "tree_method": "hist" if debug else "gpu_hist",
     }
