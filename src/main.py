@@ -1008,7 +1008,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=n_rsb,
+        n_rsb=5,
         params=params,
         categorical_cols=[],
     )
@@ -1037,10 +1037,10 @@ if __name__ == "__main__":
         params={
             "n_epoch": 10 if debug else 1000,
             "lr": 1e-3,
-            "batch_size": 256,
+            "batch_size": 512,
             "patience": 20,
             "factor": 0.1,
-            "early_stopping_rounds": 30,
+            "early_stopping_rounds": 50,
             "min_lr": 1e-5,
         },
         categorical_cols=["pref", "pref_city", "pref_city_district", "station"],
