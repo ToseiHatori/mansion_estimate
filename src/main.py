@@ -969,7 +969,7 @@ if __name__ == "__main__":
         "boosting_type": "gbdt",
         "device": "cpu",
         "feature_fraction": 0.8,
-        "num_leaves": 3000,
+        "num_leaves": 2048,
         "learning_rate": 0.1,
         "verbosity": -1,
     }
@@ -1037,7 +1037,7 @@ if __name__ == "__main__":
         params={
             "n_epoch": 10 if debug else 1000,
             "lr": 1e-3,
-            "batch_size": 512,
+            "batch_size": 256,
             "patience": 20,
             "factor": 0.1,
             "early_stopping_rounds": 30,
