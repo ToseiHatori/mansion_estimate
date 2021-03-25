@@ -761,6 +761,7 @@ class MLPTrainer(GroupKfoldTrainer):
             factor=self.params["factor"],
             patience=self.params["patience"],
             min_lr=self.params["min_lr"],
+            threshold=1e-10,
             verbose=True,
         )
         val_loss_plot = []
