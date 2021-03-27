@@ -618,7 +618,7 @@ class LGBTrainer(GroupKfoldTrainer):
             valid_sets=[dtrain, dvalid],
             num_boost_round=50000,
             early_stopping_rounds=100,
-            verbose_eval=1000,
+            verbose_eval=100,
         )
         tprint(f"best params {model.params}")
         ret = {}
