@@ -312,6 +312,11 @@ def preprocess(train_df, test_df):
     df = df.merge(econcensus_df, on="市区町村コード", how="left")
     assert len(df) == df_len, f"{len(df)}, {df_len}"
 
+    # センサス2
+    census2_df = pd.read_csv("./data/external/census2.csv")
+    df = df.merge(census2_df, on="市区町村コード", how="left")
+    assert len(df) == df_len, f"{len(df)}, {df_len}"
+
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
         if m is not None:
