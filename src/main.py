@@ -980,7 +980,7 @@ if __name__ == "__main__":
         "boosting_type": "gbdt",
         "device": "cpu",
         "feature_fraction": 0.8,
-        "num_leaves": 2048,
+        "num_leaves": 1024,
         "learning_rate": 0.1,
         "verbosity": -1,
     }
