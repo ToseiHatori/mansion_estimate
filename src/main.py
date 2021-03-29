@@ -267,6 +267,35 @@ def preprocess(train_df, test_df):
     df = df.merge(station, on=["pref", "station"], how="left")
     assert len(df) == df_len, f"{len(df)}, {df_len}"
 
+    df["station_lat_x_lon"] = df["station_lat"] * df["station_lon"]
+    df["station_lat_to_lon"] = (df["station_lat"] ** 2) + (df["station_lon"] ** 2)
+    df["station_lat_to_lon"] = [x ** 0.5 for x in df["station_lat_to_lon"]]
+    df["diff_lon"] = df["lon"] - df["station_lon"]
+    df["diff_lat"] = df["lat"] - df["station_lat"]
+    df["diff_station"] = df["station_lat_to_lon"] - df["lat_to_lon"]
+
+    def get_distance_m(lat1, lon1, lat2, lon2):
+        """
+        https://qiita.com/fetaro/items/b7c5abee42db54c0f26a
+        ２点間の距離(m)
+        球面三角法を利用した簡易的な距離計算
+        GoogleMapAPIのgeometory.computeDistanceBetweenのロジック
+        https://www.suzu6.net/posts/167-php-spherical-trigonometry/
+        """
+        R = 6378137.0  # 赤道半径
+        lat1 = math.radians(lat1)
+        lon1 = math.radians(lon1)
+        lat2 = math.radians(lat2)
+        lon2 = math.radians(lon2)
+        diff_lon = lon1 - lon2
+        dist = math.sin(lat1) * math.sin(lat2) + math.cos(lat1) * math.cos(lat2) * math.cos(diff_lon)
+        return R * math.acos(min(max(dist, -1.0), 1.0))
+
+    df["distance_to_station"] = [
+        get_distance_m(lat1, lon1, lat2, lon2)
+        for lat1, lon1, lat2, lon2 in zip(df["lat"], df["lon"], df["station_lat"], df["station_lon"])
+    ]
+
     # 国勢調査
     unuse = ["census_都道府県名", "census_都道府県市区町村名"]
     census = pd.read_csv("./data/external/census.csv").drop(unuse, axis=1).reset_index(drop=True)
@@ -276,6 +305,11 @@ def preprocess(train_df, test_df):
     # 公示価格
     price_df = pd.read_csv("./data/external/price.csv")
     df = df.merge(price_df, on="市区町村コード", how="left")
+    assert len(df) == df_len, f"{len(df)}, {df_len}"
+
+    # 経済センサス
+    econcensus_df = pd.read_csv("./data/external/econ_census.csv")
+    df = df.merge(econcensus_df, on="市区町村コード", how="left")
     assert len(df) == df_len, f"{len(df)}, {df_len}"
 
     def re_searcher(reg_exp: str, x: str) -> float:
@@ -330,6 +364,8 @@ def preprocess(train_df, test_df):
     # 取引時期など
     df["base_year"] = [int(x[0:4]) for x in df["取引時点"]]
     df["base_quarter"] = [int(x[6:7]) for x in df["取引時点"]]
+    df["timing_code"] = [y + (4 * (x - 2005)) for x, y in zip(df["base_year"], df["base_quarter"])]
+    df["passed_year"] = df["base_year"] - df["year_of_construction"]
     del df["取引時点"]
 
     # ここからGBDT系専用の処理
@@ -982,7 +1018,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=n_rsb,
+        n_rsb=n_splits,
         params=params,
         categorical_cols=[],
     )
