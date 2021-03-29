@@ -930,7 +930,7 @@ if __name__ == "__main__":
     if debug:
         n_rsb = 1
     else:
-        n_rsb = 3
+        n_rsb = 5
     predictors = [x for x in train_df.columns if x not in ["y"]]
     tprint(f"predictors length is {len(predictors)}")
     stage2_oofs = []
@@ -982,7 +982,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=5,
+        n_rsb=n_rsb,
         params=params,
         categorical_cols=[],
     )
