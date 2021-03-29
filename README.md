@@ -5,6 +5,7 @@
 from google.colab import drive
 drive.mount('/content/drive/')
 %cd "/content/drive/My Drive/Colab Notebooks/mansion_estimate"
+!pip install xgboost==1.3.3
 !pip install category-encoders
 !pip install xfeat
 !export CUDA_LAUNCH_BLOCKING=1
