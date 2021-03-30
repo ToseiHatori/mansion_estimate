@@ -1001,11 +1001,11 @@ if __name__ == "__main__":
 
     tprint("TRAIN XGBoost")
     params = {
-        "objective": "reg:pseudohubererror",
+        "objective": "reg:squarederror",
         "eval_metric": "mae",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "max_depth": 10,
+        "max_depth": 12,
         "eta": 0.01,
         "tree_method": "hist" if debug else "gpu_hist",
     }
