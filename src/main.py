@@ -573,8 +573,7 @@ class GroupKfoldTrainer(object):
         cv_score = np.mean(self.validation_score, axis=0)
         cv_std = np.std(self.validation_score, axis=0)
         tprint(f"TOTAL CV  SCORE is : {cv_score:.6f} +- {cv_std:.4f}")
-        self.oof = self.oof[self.valid_idx]
-        oof_score = self.loss_(self.oof, self.X.loc[self.valid_idx, self.target_col])
+        oof_score = self.loss_(self.oof, self.X.loc[:, self.target_col])
         tprint(f"TOTAL OOF SCORE is : {oof_score:.6f}")
         self.pred = np.mean(self.pred, axis=0)
         tprint("----終わり----\n")
@@ -991,7 +990,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=n_rsb,
+        n_rsb=4,
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
