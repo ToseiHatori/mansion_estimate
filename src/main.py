@@ -307,6 +307,11 @@ def preprocess(train_df, test_df):
     df = df.merge(price_df, on="市区町村コード", how="left")
     assert len(df) == df_len, f"{len(df)}, {df_len}"
 
+    # 経済センサス
+    econcensus_df = pd.read_csv("./data/external/econ_census.csv")
+    df = df.merge(econcensus_df, on="市区町村コード", how="left")
+    assert len(df) == df_len, f"{len(df)}, {df_len}"
+
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
         if m is not None:
@@ -466,13 +471,16 @@ def preprocess(train_df, test_df):
                 tprint(f"{col} has std={std_values}")
         return unuse_cols
 
+    # 相関高い変数をリストアップ
+    high_corr_cols = ["census_都道府県庁所在市"]
+
     unuse_cols = get_unuse_cols(train_df, 0.01)
-    train_df = train_df.drop(unuse_cols, axis=1).reset_index(drop=True)
-    test_df = test_df.drop(unuse_cols, axis=1).reset_index(drop=True)
+    train_df = train_df.drop(unuse_cols + high_corr_cols, axis=1).reset_index(drop=True)
+    test_df = test_df.drop(unuse_cols + high_corr_cols, axis=1).reset_index(drop=True)
 
     unuse_cols = get_unuse_cols(train_df_nn, 0.01)
-    train_df_nn = train_df_nn.drop(unuse_cols, axis=1).reset_index(drop=True)
-    test_df_nn = test_df_nn.drop(unuse_cols, axis=1).reset_index(drop=True)
+    train_df_nn = train_df_nn.drop(unuse_cols + high_corr_cols, axis=1).reset_index(drop=True)
+    test_df_nn = test_df_nn.drop(unuse_cols + high_corr_cols, axis=1).reset_index(drop=True)
 
     return train_df, test_df, train_df_nn, test_df_nn
 
@@ -565,8 +573,7 @@ class GroupKfoldTrainer(object):
         cv_score = np.mean(self.validation_score, axis=0)
         cv_std = np.std(self.validation_score, axis=0)
         tprint(f"TOTAL CV  SCORE is : {cv_score:.6f} +- {cv_std:.4f}")
-        self.oof = self.oof[self.valid_idx]
-        oof_score = self.loss_(self.oof, self.X.loc[self.valid_idx, self.target_col])
+        oof_score = self.loss_(self.oof, self.X.loc[:, self.target_col])
         tprint(f"TOTAL OOF SCORE is : {oof_score:.6f}")
         self.pred = np.mean(self.pred, axis=0)
         tprint("----終わり----\n")
@@ -608,7 +615,7 @@ class LGBTrainer(GroupKfoldTrainer):
             valid_sets=[dtrain, dvalid],
             num_boost_round=50000,
             early_stopping_rounds=100,
-            verbose_eval=1000,
+            verbose_eval=100,
         )
         tprint(f"best params {model.params}")
         ret = {}
@@ -616,6 +623,7 @@ class LGBTrainer(GroupKfoldTrainer):
         ret["importance"] = self._get_importance(model, importance_type="gain")
         if (self.params["random_seed"] == 0) and (self.fold_cnt == 1):
             tprint(f'importance(TOP30): {ret["importance"].sort_values(by="importance", ascending=False).head(30)}')
+            tprint(f'importance(UND30): {ret["importance"].sort_values(by="importance", ascending=False).tail(30)}')
         return ret
 
     def _predict(self, model, X):
@@ -761,6 +769,7 @@ class MLPTrainer(GroupKfoldTrainer):
             factor=self.params["factor"],
             patience=self.params["patience"],
             min_lr=self.params["min_lr"],
+            threshold=1e-10,
             verbose=True,
         )
         val_loss_plot = []
@@ -956,7 +965,7 @@ if __name__ == "__main__":
     if debug:
         n_rsb = 1
     else:
-        n_rsb = 3
+        n_rsb = 5
     predictors = [x for x in train_df.columns if x not in ["y"]]
     tprint(f"predictors length is {len(predictors)}")
     stage2_oofs = []
@@ -981,7 +990,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=n_rsb,
+        n_rsb=3,
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
@@ -992,11 +1001,11 @@ if __name__ == "__main__":
 
     tprint("TRAIN XGBoost")
     params = {
-        "objective": "reg:squarederror",
+        "objective": "reg:pseudohubererror",
         "eval_metric": "mae",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "max_depth": 12,
+        "max_depth": 8,
         "eta": 0.01,
         "tree_method": "hist" if debug else "gpu_hist",
     }
@@ -1008,7 +1017,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=5,
+        n_rsb=n_rsb,
         params=params,
         categorical_cols=[],
     )
@@ -1064,4 +1073,10 @@ if __name__ == "__main__":
         # submit
         sample_submission["取引価格（総額）_log"] = blend_preds
         sample_submission.to_csv("./submit.csv", index=False)
+        # submit
+        sample_submission["取引価格（総額）_log"] = blend_preds * 0.95
+        sample_submission.to_csv("./submit_95.csv", index=False)
+        # submit
+        sample_submission["取引価格（総額）_log"] = blend_preds * 1.05
+        sample_submission.to_csv("./submit_05.csv", index=False)
     tprint("---おわり---")
