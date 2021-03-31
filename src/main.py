@@ -990,7 +990,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=4,
+        n_rsb=3,
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
@@ -1001,11 +1001,11 @@ if __name__ == "__main__":
 
     tprint("TRAIN XGBoost")
     params = {
-        "objective": "reg:squarederror",
+        "objective": "reg:pseudohubererror",
         "eval_metric": "mae",
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "max_depth": 12,
+        "max_depth": 8,
         "eta": 0.01,
         "tree_method": "hist" if debug else "gpu_hist",
     }
