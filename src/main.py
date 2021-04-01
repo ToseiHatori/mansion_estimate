@@ -990,7 +990,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=3,
+        n_rsb=n_rsb,
         params=params,
         categorical_cols=["pref", "pref_city", "pref_city_district"],
     )
