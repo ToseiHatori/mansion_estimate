@@ -1042,7 +1042,7 @@ if __name__ == "__main__":
         groups=train_df["base_year"],
         test=test_df,
         n_splits=n_splits,
-        n_rsb=1,
+        n_rsb=n_rsb,
         params={
             "n_epoch": 10 if debug else 1000,
             "lr": 1e-3,
