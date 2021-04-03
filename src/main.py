@@ -525,58 +525,63 @@ class GroupKfoldTrainer(object):
         with open(file_path, "rb") as f:
             return pickle.load(f)
 
-    def fit(self):
+    def fit(self, nth_split, nth_rsb):
         gf = GroupKFold(n_splits=self.n_splits)
         for fold_cnt, (train_idx, valid_idx) in enumerate(gf.split(self.X, None, self.groups)):
-            fold_cnt += 1
             self.fold_cnt = fold_cnt
-            tprint(f"START FOLD {fold_cnt}")
 
-            # DataFrame -> train, valid
-            X_train, X_valid = self.X.loc[train_idx, self.predictors], self.X.loc[valid_idx, self.predictors]
-            Y_train, Y_valid = self.X.loc[train_idx, self.target_col], self.X.loc[valid_idx, self.target_col]
-            tprint(f"training years : {set(self.X.loc[train_idx, 'base_year'])}")
-            tprint(f"validation years : {set(self.X.loc[valid_idx, 'base_year'])}")
-            self.valid_idx = valid_idx
+            if self.fold_cnt == nth_split:
+                tprint(f"START FOLD {fold_cnt}")
+                # DataFrame -> train, valid
+                X_train, X_valid = self.X.loc[train_idx, self.predictors], self.X.loc[valid_idx, self.predictors]
+                Y_train, Y_valid = self.X.loc[train_idx, self.target_col], self.X.loc[valid_idx, self.target_col]
+                tprint(f"training years : {set(self.X.loc[train_idx, 'base_year'])}")
+                tprint(f"validation years : {set(self.X.loc[valid_idx, 'base_year'])}")
+                self.valid_idx = valid_idx
+            else:
+                continue
 
             # random seed blending
             for rsb_idx in range(self.n_rsb):
-                tprint(f"     fitting {rsb_idx + 1} th loop of {self.n_rsb}")
                 # 学習
-                ret = self._fit(X_train, Y_train, X_valid, Y_valid, loop_seed=rsb_idx)
-                # save models
-                """
-                if (fold_cnt == 1) & (rsb_idx == 0):
-                    self.folds.append(ret)
-                """
-                model = ret["model"]
+                if (self.fold_cnt == nth_split) & (rsb_idx == nth_rsb):
+                    tprint(f"     fitting {rsb_idx + 1} th loop of {self.n_rsb}")
+                    ret = self._fit(X_train, Y_train, X_valid, Y_valid, loop_seed=rsb_idx)
+                    # save models
+                    """
+                    if (fold_cnt == 1) & (rsb_idx == 0):
+                        self.folds.append(ret)
+                    """
+                    model = ret["model"]
 
-                # oof, predに対して予測
-                pred_oof = self._predict(model, X_valid)
-                pred_test = self._predict(model, self.test)
+                    # oof, predに対して予測
+                    pred_oof = self._predict(model, X_valid)
+                    pred_test = self._predict(model, self.test)
 
-                # 格納
-                self.oof[valid_idx] += pred_oof / self.n_rsb
-                self.pred.append(pred_test)
+                    # 格納
+                    self.oof[valid_idx] += pred_oof / self.n_rsb
+                    self.pred.append(pred_test)
 
-                # single fold validation　score
-                _validation_score = self.loss_(pred_oof, Y_valid.values)
-                tprint((f"     finished {rsb_idx + 1}" + f"th loop WITH {_validation_score:.6f}"))
+                    # single fold validation　score
+                    _validation_score = self.loss_(pred_oof, Y_valid.values)
+                    tprint((f"     finished {rsb_idx + 1}" + f"th loop WITH {_validation_score:.6f}"))
 
             # rsb validation　score
-            _validation_score = self.loss_(self.oof[valid_idx], Y_valid.values)
-            self.validation_score.append(_validation_score)
-            tprint(f"     END FOLD {fold_cnt} WITH {_validation_score:.6f}")
-            tprint("----切り取り----\n")
+            if (self.fold_cnt + 1) == self.n_splits:
+                _validation_score = self.loss_(self.oof[valid_idx], Y_valid.values)
+                self.validation_score.append(_validation_score)
+                tprint(f"     END FOLD {fold_cnt} WITH {_validation_score:.6f}")
+                tprint("----切り取り----\n")
 
-        # validation score of fold mean
-        cv_score = np.mean(self.validation_score, axis=0)
-        cv_std = np.std(self.validation_score, axis=0)
-        tprint(f"TOTAL CV  SCORE is : {cv_score:.6f} +- {cv_std:.4f}")
-        oof_score = self.loss_(self.oof, self.X.loc[:, self.target_col])
-        tprint(f"TOTAL OOF SCORE is : {oof_score:.6f}")
-        self.pred = np.mean(self.pred, axis=0)
-        tprint("----終わり----\n")
+        if (nth_split == self.n_splits) & (nth_rsb == self.n_rsb):
+            # validation score of fold mean
+            cv_score = np.mean(self.validation_score, axis=0)
+            cv_std = np.std(self.validation_score, axis=0)
+            tprint(f"TOTAL CV  SCORE is : {cv_score:.6f} +- {cv_std:.4f}")
+            oof_score = self.loss_(self.oof, self.X.loc[:, self.target_col])
+            tprint(f"TOTAL OOF SCORE is : {oof_score:.6f}")
+            self.pred = np.mean(self.pred, axis=0)
+            tprint("----終わり----\n")
 
 
 class LGBTrainer(GroupKfoldTrainer):
@@ -617,11 +622,10 @@ class LGBTrainer(GroupKfoldTrainer):
             early_stopping_rounds=100,
             verbose_eval=100,
         )
-        tprint(f"best params {model.params}")
         ret = {}
         ret["model"] = model
         ret["importance"] = self._get_importance(model, importance_type="gain")
-        if (self.params["random_seed"] == 0) and (self.fold_cnt == 1):
+        if (self.params["random_seed"] == 0) and (self.fold_cnt == 0):
             tprint(f'importance(TOP30): {ret["importance"].sort_values(by="importance", ascending=False).head(30)}')
             tprint(f'importance(UND30): {ret["importance"].sort_values(by="importance", ascending=False).tail(30)}')
         return ret
@@ -930,15 +934,21 @@ def get_best_weights(oofs, labels):
 
 
 @Cache("./cache")
+def _fit_trainer(trainer_instance, nth_split, nth_rsb):
+    trainer_instance.fit(nth_split, nth_rsb)
+    return trainer_instance
+
+
 def fit_trainer(trainer_instance):
-    trainer_instance.fit()
+    for nth_split in range(trainer_instance.n_splits):
+        for nth_rsb in range(trainer_instance.n_rsb):
+            trainer_instance = _fit_trainer(trainer_instance, nth_split, nth_rsb)
     del trainer_instance.X
-    trainer_instance.save()
     return trainer_instance
 
 
 if __name__ == "__main__":
-    debug = False
+    debug = True
     tprint(f"debug mode {debug}")
     tprint("loading data")
     (train_df, test_df, sample_submission) = get_data()
@@ -961,10 +971,11 @@ if __name__ == "__main__":
         with open("./data/processed/test_df_nn.pickle", "wb") as f:
             pickle.dump(test_df_nn, f)
     del train_df_nn, test_df_nn
-    n_splits = 6
     if debug:
-        n_rsb = 1
+        n_splits = 3
+        n_rsb = 2
     else:
+        n_splits = 6
         n_rsb = 5
     predictors = [x for x in train_df.columns if x not in ["y"]]
     tprint(f"predictors length is {len(predictors)}")
@@ -978,7 +989,7 @@ if __name__ == "__main__":
         "boosting_type": "gbdt",
         "device": "cpu",
         "feature_fraction": 0.8,
-        "num_leaves": 2048,
+        "num_leaves": 5 if debug else 2048,
         "learning_rate": 0.1,
         "verbosity": -1,
     }
