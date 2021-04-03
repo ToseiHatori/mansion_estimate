@@ -567,13 +567,13 @@ class GroupKfoldTrainer(object):
                     tprint((f"     finished {rsb_idx + 1}" + f"th loop WITH {_validation_score:.6f}"))
 
             # rsb validation　score
-            if (self.fold_cnt + 1) == self.n_splits:
+            if (nth_rsb+1) == self.n_rsb:
                 _validation_score = self.loss_(self.oof[valid_idx], Y_valid.values)
                 self.validation_score.append(_validation_score)
                 tprint(f"     END FOLD {fold_cnt} WITH {_validation_score:.6f}")
                 tprint("----切り取り----\n")
 
-        if (nth_split == self.n_splits) & (nth_rsb == self.n_rsb):
+        if ((nth_split + 1) == self.n_splits) & ((nth_rsb + 1) == self.n_rsb):
             # validation score of fold mean
             cv_score = np.mean(self.validation_score, axis=0)
             cv_std = np.std(self.validation_score, axis=0)
