@@ -567,7 +567,7 @@ class GroupKfoldTrainer(object):
                     tprint((f"     finished {rsb_idx + 1}" + f"th loop WITH {_validation_score:.6f}"))
 
             # rsb validation　score
-            if (nth_rsb+1) == self.n_rsb:
+            if (nth_rsb + 1) == self.n_rsb:
                 _validation_score = self.loss_(self.oof[valid_idx], Y_valid.values)
                 self.validation_score.append(_validation_score)
                 tprint(f"     END FOLD {fold_cnt} WITH {_validation_score:.6f}")
@@ -1035,6 +1035,7 @@ if __name__ == "__main__":
     xgb_trainer = fit_trainer(xgb_trainer)
     stage2_oofs.append(xgb_trainer.oof)
     stage2_preds.append(xgb_trainer.pred)
+    tprint(f"XGB SCORE IS {np.mean(xgb_trainer.validation_score):.4f}")
 
     # ここからNN
     with open("./data/processed/train_df_nn.pickle", "rb") as f:
