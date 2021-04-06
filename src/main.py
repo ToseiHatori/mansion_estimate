@@ -1069,6 +1069,7 @@ if __name__ == "__main__":
     mlp_trainer = fit_trainer(mlp_trainer)
     stage2_oofs.append(mlp_trainer.oof)
     stage2_preds.append(mlp_trainer.pred)
+    tprint(f"MLP SCORE IS {np.mean(mlp_trainer.validation_score):.4f}")
 
     # blending
     best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
