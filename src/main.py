@@ -948,7 +948,7 @@ def fit_trainer(trainer_instance):
 
 
 if __name__ == "__main__":
-    debug = True
+    debug = False
     tprint(f"debug mode {debug}")
     tprint("loading data")
     (train_df, test_df, sample_submission) = get_data()
@@ -1035,7 +1035,6 @@ if __name__ == "__main__":
     xgb_trainer = fit_trainer(xgb_trainer)
     stage2_oofs.append(xgb_trainer.oof)
     stage2_preds.append(xgb_trainer.pred)
-    tprint(f"XGB SCORE IS {np.mean(xgb_trainer.validation_score):.4f}")
 
     # ここからNN
     with open("./data/processed/train_df_nn.pickle", "rb") as f:
@@ -1069,7 +1068,6 @@ if __name__ == "__main__":
     mlp_trainer = fit_trainer(mlp_trainer)
     stage2_oofs.append(mlp_trainer.oof)
     stage2_preds.append(mlp_trainer.pred)
-    tprint(f"MLP SCORE IS {np.mean(mlp_trainer.validation_score):.4f}")
 
     # blending
     best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
