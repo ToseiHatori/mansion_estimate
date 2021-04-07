@@ -307,11 +307,6 @@ def preprocess(train_df, test_df):
     df = df.merge(price_df, on="市区町村コード", how="left")
     assert len(df) == df_len, f"{len(df)}, {df_len}"
 
-    # 経済センサス
-    econcensus_df = pd.read_csv("./data/external/econ_census.csv")
-    df = df.merge(econcensus_df, on="市区町村コード", how="left")
-    assert len(df) == df_len, f"{len(df)}, {df_len}"
-
     def re_searcher(reg_exp: str, x: str) -> float:
         m = re.search(reg_exp, x)
         if m is not None:
