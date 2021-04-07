@@ -1072,12 +1072,12 @@ if __name__ == "__main__":
     tprint(f"MLP SCORE IS {np.mean(mlp_trainer.validation_score):.4f}")
 
     # blending
-    best_weights = get_best_weights(stage2_oofs, train_df.loc[lgb_trainer.valid_idx, "y"].values)
+    best_weights = get_best_weights(stage2_oofs, train_df["y"].values)
     best_weights = np.insert(best_weights, len(best_weights), 1 - np.sum(best_weights))
     tprint("post processed optimized weight", best_weights)
     oof_preds = np.stack(stage2_oofs).transpose(1, 0).dot(best_weights)
     blend_preds = np.stack(stage2_preds).transpose(1, 0).dot(best_weights)
-    tprint("final oof score", mean_absolute_error(train_df.loc[lgb_trainer.valid_idx, "y"].values, oof_preds))
+    tprint("final oof score", mean_absolute_error(train_df["y"].values, oof_preds))
     tprint("writing result...")
 
     if not debug:
