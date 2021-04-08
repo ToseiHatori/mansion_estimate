@@ -1030,6 +1030,7 @@ if __name__ == "__main__":
     xgb_trainer = fit_trainer(xgb_trainer)
     stage2_oofs.append(xgb_trainer.oof)
     stage2_preds.append(xgb_trainer.pred)
+    tprint(f"XGB SCORE IS {np.mean(xgb_trainer.validation_score):.4f}")
 
     # ここからNN
     with open("./data/processed/train_df_nn.pickle", "rb") as f:
